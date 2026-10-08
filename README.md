@@ -1,50 +1,96 @@
-# Waifu Market — Web App
+# Waifu Telegram Mini App
 
-> **Important:** This application is a Python Flask service backed by MongoDB and Telegram. It is not the `artifacts/mockup-sandbox` frontend workspace and must not be deployed with `wrangler deploy` as a Cloudflare Worker.
+Python 3.12 / Flask mini app for the connected Telegram catch bot.
 
-## Correct deployment: Render Web Service
+## Vercel မှာ တင်ရန်
 
-1. Create a **Web Service** on [Render](https://render.com).
-2. Connect this repository, `osamudav1/Waifuweb112373`.
-3. Use the included `render.yaml` Blueprint, or set:
-   - **Build command:** `pip install -r requirements.txt`
-   - **Start command:** `python app.py`
-   - **Health check path:** `/healthz`
-4. Set `MONGO_URI`, `BOT_TOKEN`, and `OWNER_ID`; optionally set the remaining values from `.env.example`.
-5. Open the Render URL. If the app is not configured yet, it will redirect to `/setup`.
+1. Vercel → **Add New → Project** မှာ `thanhtikeaungjp01-debug/web` repo ကို import လုပ်ပါ။
+2. **Root Directory** ကို repo root (`./`)၊ **Framework Preset** ကို **Flask** ထားပါ။ `artifacts/mockup-sandbox` ကို မရွေးပါနဲ့။
+3. `vercel.json` က build command (`python scripts/build_vercel.py`) ကို သတ်မှတ်ထားပါတယ်။ Install Command / Output Directory overrides မထည့်ပါနဲ့။ Node / pnpm build မလိုပါ။
+4. အောက်ပါ environment variables ကို **Production** မှာ ထည့်ပြီး Deploy နှိပ်ပါ။ Preview deployment စမ်းမယ်ဆိုရင် Preview environment မှာလည်း သီးသန့် test values ထည့်ပါ။
 
-The repository includes `scripts/verify_deployment.py` for a credential-free local smoke test:
+| Variable | ထည့်ရန် |
+| --- | --- |
+| `MONGO_URI` | Bot နဲ့အတူသုံးမယ့် MongoDB Atlas connection URI |
+| `DB_NAME` | Bot သုံးတဲ့ database name (default `waifu_bot`) |
+| `BOT_TOKEN` | BotFather ကရတဲ့ token |
+| `BOT_USERNAME` | Bot username (`@` မပါ) |
+| `OWNER_ID` | Owner ရဲ့ numeric Telegram user ID |
+| `SESSION_SECRET` | အနည်းဆုံး 32 characters ရှိတဲ့ random secret; deploy တိုင်း မပြောင်းပါနဲ့ |
+
+Secret ထုတ်ရန်: `python -c "import secrets; print(secrets.token_urlsafe(48))"`
+
+MongoDB Atlas **Network Access** မှာ Vercel function က ချိတ်လို့ရအောင် သတ်မှတ်ပါ။ DB user ကို သက်ဆိုင်ရာ database အတွက် read/write ခွင့်ပေးပါ။ Bot HTTP API သုံးမယ်ဆိုရင် `BOT_API_URL` နဲ့ `BOT_API_KEY` ကိုပါ ထည့်ပါ။ Secrets ကို Git ထဲ မတင်ပါနဲ့။
+
+5. Deploy ပြီးရင် `https://YOUR-PROJECT.vercel.app/healthz` မှာ `{"status":"ok"}` ရမရကြည့်ပါ။ ဒါက app liveness သာဖြစ်ပြီး MongoDB/Telegram connection ကို အတည်မပြုပါ။
+6. BotFather `/setdomain` မှာ production hostname သတ်မှတ်ပါ။ `/setmenubutton` (သို့) Main Mini App URL မှာ HTTPS app URL ထည့်ပါ။ Bot ရဲ့ `MARKET_URL` ကိုလည်း ဒီ URL နဲ့ပြောင်းပါ။
+7. Telegram ကနေ app ဖွင့်ပြီး login၊ balance၊ Admin → Appearance မှာ title/subtitle/logo save စမ်းပါ။ Incognito browser/နောက် device ကနေပြန်ဖွင့်ပြီး သိမ်းထားတာ ရှိနေကြောင်းစစ်ပါ။ Telegram ကနေဝင်တဲ့ production URL ကို သုံးပါ; Vercel Deployment Protection ဖွင့်ထားတဲ့ preview URL က visitors ကို ပိတ်ထားနိုင်ပါတယ်။
+
+### Vercel ပေါ်မှာ သိမ်းဆည်းပုံ
+
+- Owner title/subtitle/settings ကို MongoDB `bot_settings` collection ရဲ့ `web_config` document မှာ သိမ်းပါတယ်။ Logo၊ welcome images နဲ့ account data လည်း MongoDB မှာပဲ သိမ်းပါတယ်။ Database တူတဲ့ deployments တွေက settings ကို အတူသုံးပါတယ်။
+- Environment variable က saved setting ထက် ဦးစားပေးပါတယ်။ Owner panel ကပြောင်းမယ့် `SITE_TITLE`, `SITE_SUBTITLE`, `MAINTENANCE_MODE` တွေကို Vercel env မှာ မသတ်မှတ်ပါနဲ့။ `MONGO_URI`, `DB_NAME`, `SESSION_SECRET` ကို Vercel Settings ကနေသာပြောင်းပြီး redeploy လုပ်ပါ။
+- Existing server ရဲ့ `data/config.json` ကို Vercel ဆီ အလိုအလျောက် မကူးပါ။ Credentials ကို env ထဲထည့်ပြီး Appearance/settings ကို owner panel ကနေ ပြန်သိမ်းပါ။ Existing Mongo logo/user data ကို ဆက်သုံးပါတယ်။
+- Cold start/redeploy က maintenance mode ကို မပြောင်းပါ။ MongoDB မရရင် local JSON ထဲ fallback မရေးပါ။
+- Static CSS/JS/images ကို build က `public/static` ဆီကူးပြီး Vercel CDN ကပို့ပါတယ်။ Telegram media cache က `/tmp` မှာ 128 MiB အထိသာထားတဲ့ ယာယီ cache ဖြစ်ပါတယ်။
+- Vercel ရဲ့ 4.5 MB request/response limit အတွက် **upload တစ်ဖိုင် 4 MiB အထိ** သာခွင့်ပြုပါတယ်။ Logo/welcome/ad upload UI က ကြိုစစ်ပေးပါတယ်။ Proxied Telegram media 4 MiB ကျော်ရင် placeholder ပြပါတယ်။ ကြီးတဲ့ video တွေကို ဒီ proxy မှာ တိုက်ရိုက်မပို့နိုင်ပါ။
+- Bot process ကို Vercel မှာ မ run ပါ။ အခု repo က mini app ဖြစ်ပြီး bot က လက်ရှိ host မှာ ဆက် run ရပါမယ်။
+
+Official deployment references: [Flask on Vercel](https://vercel.com/docs/frameworks/backend/flask), [Python runtime](https://vercel.com/docs/functions/runtimes/python), [Function limits](https://vercel.com/docs/functions/limitations).
+
+## Local development / persistent server
 
 ```bash
-python scripts/verify_deployment.py
+python -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+python app.py
 ```
 
-## Cloudflare setup
+`python app.py` uses exported environment variables. To load a private `.env` explicitly, use `flask --app app run` (python-dotenv is included). For local HTTP, set `SESSION_COOKIE_SECURE=0`. Without MongoDB, local development uses JSON in `data/`. For browser-based first-time setup on a persistent server, set `SETUP_KEY` and use `/setup`; blank secret fields preserve current values. On Vercel, configure the required environment variables before deploying.
 
-Cloudflare Pages/Workers cannot run this Python Flask application directly. If a `workers.dev` URL shows **“Component Preview Server”**, it is the unrelated `artifacts/mockup-sandbox` demo and means the wrong project was deployed.
+Render remains supported through `render.yaml` (`pip install -r requirements.txt`, `python app.py`, health path `/healthz`). Cloudflare Workers cannot run this Flask app directly.
 
-Use Cloudflare only after the Render service is working:
+## Local verification
 
-1. Copy the Render hostname, for example `waifu-web-market.onrender.com`.
-2. In Cloudflare DNS, create a CNAME record for your desired hostname pointing to that Render hostname.
-3. Enable the orange-cloud proxy if desired and set SSL/TLS mode to **Full**.
-4. Open the custom domain, not the unrelated `*.workers.dev` preview URL.
+```bash
+PYTHONPATH=. python scripts/verify_deployment.py
+PYTHONPATH=. python scripts/test_vercel_deployment.py
+PYTHONPATH=. python scripts/test_auth_security.py
+PYTHONPATH=. python scripts/test_admin_branding.py
+python scripts/build_vercel.py
+```
 
-Do **not** select `artifacts/mockup-sandbox` as the Cloudflare Pages build directory, and do not use `wrangler deploy` for this repository. `render.yaml` is the source of truth for production deployment.
+These checks use synthetic fixtures; real Telegram sign-in and Atlas connectivity must also be checked after deployment.
 
-## First-time setup
+## Authentication and local development
 
-1. Deploy on Render.
-2. Open the web URL and complete `/setup` with `MONGO_URI`, `BOT_TOKEN`, and `OWNER_ID`.
-3. For the Bot API, run `/api` in the Telegram bot to generate a key.
-4. Paste the bot's Render URL and that key in the setup form.
+- Set `BOT_USERNAME` and register your deployed domain with BotFather's `/setdomain` to enable the Telegram login widget. Users can also enter through the Telegram Mini App or a short-lived bot login link.
+- Keep `SESSION_SECRET` stable and random. The Render Blueprint generates it automatically; set it yourself on Vercel. Set `SESSION_COOKIE_SECURE=1` on HTTPS; leave it `0` for local HTTP. Enable `TRUST_PROXY=1` only behind a single trusted reverse proxy; the Render Blueprint enables this so Telegram callbacks use HTTPS.
+- Login signatures must be recent (within 24 hours, with 30 seconds of clock tolerance). Successful login rotates the session. Logout is a CSRF-protected POST.
+- Browser writes include a session CSRF token. Bot integrations continue to use a bearer API key on `/api/internal/rarity-gate`.
+- Bot and web must share the same MongoDB database for login tokens. Tokens are consumed atomically; a database failure does not fall back to a duplicate JSON token. With no MongoDB configured, a locked local JSON file supports development on one host.
+- `SETUP_KEY` protects first-time browser setup; environment-based configuration does not require opening the wizard. Configuration secrets and local runtime JSON files are ignored by Git.
 
-## Health check
+Install Python 3.12 dependencies with `python -m pip install -r requirements.txt`, then run `python app.py`. `/` and `/setup` can be previewed without credentials; `/market` requires a configured database as before.
 
-- URL: `https://your-web.onrender.com/healthz`
-- Response: `{"status":"ok"}`
+Run the credential-free checks from the repository root:
 
-## Connecting Bot ↔ Web
+```bash
+PYTHONPATH=. python scripts/test_auth_security.py
+for test in scripts/test_*.py; do PYTHONPATH=. python "$test" || exit 1; done
+python scripts/verify_deployment.py
+node --check static/js/app.js
+```
 
-- Set `MARKET_URL` in the bot to this web app's URL.
-- Set `BOT_API_URL` and `BOT_API_KEY` in the web app to the bot's URL and API key.
+The authentication tests use signed synthetic Telegram data and temporary local stores. They do not substitute for checking BotFather domain registration, a real Telegram callback, and a live MongoDB connection on your deployment.
+
+## Mini app name and logo
+
+As the configured owner, open **Admin → Appearance**. Under **Mini App Branding**, edit **App name** (up to 40 characters) and **Subtitle** (up to 64 characters), then select **Save Branding**. A blank subtitle hides the second line.
+
+Under **Site Logo**, upload a PNG, JPEG, GIF or WebP photo (up to 4 MiB on Vercel, 5 MiB on a persistent server). It appears beside the name on Home; **Remove** restores the default icon. Logos are resized to 512 pixels or smaller and browsers revalidate them so replacing a logo shows the latest image. Text is stored in the existing runtime configuration and the logo in the existing database settings.
+
+## Display preferences
+
+Open the three-dot menu on Home to select **Small / Large** and **Dark / Light / Blue**. Both choices persist on that browser/device and apply across pages. Large also expands Telegram and requests fullscreen on supported Telegram 8.0+ clients; Small exits fullscreen and uses a compact layout. Older clients support expansion only: Telegram does not expose a collapse API, so reducing its window requires a swipe. Fullscreen is requested only after a button press; a reload restores the layout preference.

@@ -156,6 +156,8 @@
     </div>
 
     <form method="POST" action="{{ url_for('setup') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {% if not configured %}<div class="form-group"><label class="form-label" for="setup-key">Setup key</label><input id="setup-key" class="form-input" type="password" name="setup_key" required autocomplete="off"><div class="form-hint">Use the SETUP_KEY configured in the server environment.</div></div>{% endif %}
 
       <div class="form-section">
         <div class="form-section-title">🤖 Telegram Bot</div>
@@ -163,9 +165,9 @@
           <label class="form-label">Bot Token <span class="req">*</span></label>
           <input class="form-input" type="password" name="BOT_TOKEN"
                  placeholder="123456:ABC-DEF…"
-                 value="{{ 'set' if bot_token_set else '' }}"
+                 value=""
                  autocomplete="off">
-          <div class="form-hint">From @BotFather. Already set if showing "set".</div>
+          <div class="form-hint">From @BotFather. Leave blank to keep the existing value.</div>
         </div>
         <div class="form-group">
           <label class="form-label">Bot Username <span class="opt">(optional)</span></label>
@@ -196,9 +198,9 @@
           <label class="form-label">MongoDB URI <span class="req">*</span></label>
           <input class="form-input" type="password" name="MONGO_URI"
                  placeholder="mongodb+srv://user:pass@cluster.mongodb.net/…"
-                 value="{{ 'set' if mongo_set else '' }}"
+                 value=""
                  autocomplete="off">
-          <div class="form-hint">MongoDB Atlas connection string. Already set if showing "set".</div>
+          <div class="form-hint">MongoDB Atlas connection string. Leave blank to keep the existing value.</div>
         </div>
         <div class="form-group">
           <label class="form-label">Database Name <span class="opt">(default: waifu_bot)</span></label>

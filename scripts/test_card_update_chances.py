@@ -73,6 +73,10 @@ try:
         session["first_name"] = "Tester"
         session["robot_verified_at"] = time.time()
 
+    client.get("/")
+    with client.session_transaction() as session:
+        client.environ_base["HTTP_X_CSRF_TOKEN"] = session["csrf_token"]
+
     web_app.random.random = lambda: 0.01
     win = client.post("/api/card-update/spin", json={"source_id": "501", "target_id": "991"})
     assert win.status_code == 200, win.json

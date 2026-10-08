@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="480" viewBox="0 0 360 480" fill="none">
+  <defs><linearGradient id="bg" x2="360" y2="480" gradientUnits="userSpaceOnUse"><stop stop-color="#302540"/><stop offset="1" stop-color="#151322"/></linearGradient></defs>
+  <path fill="url(#bg)" d="M0 0h360v480H0z"/>
+  <rect x="25" y="25" width="310" height="430" rx="16" stroke="#695078" stroke-opacity=".45"/>
+  <circle cx="180" cy="222" r="80" stroke="#695078" stroke-opacity=".4"/>
+  <path d="m180 155 17 48 50 19-50 18-17 49-18-49-49-18 49-19z" fill="#ae8ec7" fill-opacity=".45"/>
+  <path d="m278 77 5 15 16 6-16 6-5 15-6-15-15-6 15-6zM72 350l5 15 16 6-16 6-5 15-6-15-15-6 15-6z" fill="#ae8ec7" fill-opacity=".5"/>
+  <text x="180" y="350" fill="#c6afda" font-family="system-ui,sans-serif" font-size="12" letter-spacing="3" text-anchor="middle">WAIFU MARKET</text>
+  <text x="180" y="374" fill="#9d8dac" font-family="system-ui,sans-serif" font-size="11" text-anchor="middle">Artwork unavailable</text>
+</svg>

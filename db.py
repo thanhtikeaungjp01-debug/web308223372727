@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import time
 import uuid
 from pathlib import Path
@@ -195,7 +196,7 @@ class MongoWebDB:
 
     def find_user_by_username(self, username: str):
         username = username.lstrip("@")
-        return self._users.find_one({"username": {"$regex": f"^{username}$", "$options": "i"}})
+        return self._users.find_one({"username": {"$regex": f"^{re.escape(username)}$", "$options": "i"}})
 
     def get_listings(self, skip=0, limit=20, rarity=None, search=None) -> list:
         filt: dict = {}
@@ -203,8 +204,8 @@ class MongoWebDB:
             filt["char.rarity"] = rarity
         if search:
             filt["$or"] = [
-                {"char.name":  {"$regex": search, "$options": "i"}},
-                {"char.anime": {"$regex": search, "$options": "i"}},
+                {"char.name":  {"$regex": re.escape(search), "$options": "i"}},
+                {"char.anime": {"$regex": re.escape(search), "$options": "i"}},
             ]
         return list(self._market.find(filt).sort("listed_at", self._DESC).skip(skip).limit(limit))
 
@@ -214,8 +215,8 @@ class MongoWebDB:
             filt["char.rarity"] = rarity
         if search:
             filt["$or"] = [
-                {"char.name":  {"$regex": search, "$options": "i"}},
-                {"char.anime": {"$regex": search, "$options": "i"}},
+                {"char.name":  {"$regex": re.escape(search), "$options": "i"}},
+                {"char.anime": {"$regex": re.escape(search), "$options": "i"}},
             ]
         return self._market.count_documents(filt)
 
@@ -484,7 +485,9 @@ class MongoWebDB:
         keys = (doc or {}).get("keys", [])
         return any(k["key"] == key for k in keys)
 
-    def get_logo(self) -> dict | None:
+    def get_logo(self, include_data=True) -> dict | None:
+        if not include_data:
+            return self._settings.find_one({"_id": "site_logo", "data": {"$exists": True, "$ne": ""}}, {"mime": 1})
         doc = self._settings.find_one({"_id": "site_logo"})
         if doc and doc.get("data"):
             return {"data": doc["data"], "mime": doc.get("mime", "image/jpeg")}
@@ -500,8 +503,8 @@ class MongoWebDB:
     def delete_logo(self) -> None:
         self._settings.delete_one({"_id": "site_logo"})
 
-    def get_welcome_slides(self) -> list:
-        doc = self._settings.find_one({"_id": "welcome_slides"})
+    def get_welcome_slides(self, include_data=True) -> list:
+        doc = self._settings.find_one({"_id": "welcome_slides"}, None if include_data else {"slides.data": 0})
         return (doc or {}).get("slides", [])
 
     def set_welcome_slides(self, slides: list) -> None:
@@ -527,7 +530,9 @@ class MongoWebDB:
             {"$inc": {"coins": -int(amount)}},
         )
         return bool(result.modified_count)
-    def get_ad_banner(self) -> dict | None:
+    def get_ad_banner(self, include_data=True) -> dict | None:
+        if not include_data:
+            return self._settings.find_one({"_id": "ad_banner", "data": {"$exists": True, "$ne": ""}}, {"mime": 1})
         doc = self._settings.find_one({"_id": "ad_banner"})
         if doc and doc.get("data"):
             return {"data": doc["data"], "mime": doc.get("mime", "image/jpeg")}
@@ -1096,7 +1101,7 @@ class LocalWebDB:
         keys     = settings.get("web_api_keys", {}).get("keys", [])
         return any(k["key"] == key for k in keys)
 
-    def get_logo(self) -> dict | None:
+    def get_logo(self, include_data=True) -> dict | None:
         logo = self._load("settings").get("site_logo")
         return logo if logo and logo.get("data") else None
 
@@ -1110,7 +1115,7 @@ class LocalWebDB:
         s.pop("site_logo", None)
         self._u("settings", s)
 
-    def get_welcome_slides(self) -> list:
+    def get_welcome_slides(self, include_data=True) -> list:
         return self._load("settings").get("welcome_slides", [])
 
     def set_welcome_slides(self, slides: list) -> None:
@@ -1141,7 +1146,7 @@ class LocalWebDB:
         self._u("settings", settings)
         return True
 
-    def get_ad_banner(self) -> dict | None:
+    def get_ad_banner(self, include_data=True) -> dict | None:
         ad = self._load("settings").get("ad_banner")
         return ad if ad and ad.get("data") else None
 
@@ -1364,13 +1369,12 @@ def get_db() -> MongoWebDB | LocalWebDB:
         mongo_uri = _cfg("MONGO_URI")
         db_name   = _cfg("DB_NAME", "waifu_bot")
         if mongo_uri:
-            try:
-                _db = MongoWebDB(mongo_uri, db_name)
-                print("[WebDB] Connected to MongoDB ✓")
-            except Exception as e:
-                print(f"[WebDB] MongoDB failed ({e}) — using local JSON store")
-                _db = LocalWebDB()
+            # A configured database is authoritative; never lose writes into a
+            # disposable JSON fallback when MongoDB is unavailable.
+            _db = MongoWebDB(mongo_uri, db_name)
         else:
+            if os.environ.get("VERCEL") == "1":
+                raise RuntimeError("MONGO_URI is required on Vercel.")
             print("[WebDB] No MONGO_URI — using local JSON store")
             _db = LocalWebDB()
     return _db

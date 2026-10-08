@@ -4,32 +4,6 @@
 
 <div class="page-header">
   <a href="{{ url_for('index') }}" class="btn btn-ghost btn-sm" style="position:absolute;right:0;top:-10px;z-index:2;">‹ Back</a>
-  <div class="spin-wheel-bg" aria-hidden="true">
-    <svg class="spin-wheel-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="100" cy="100" r="96" fill="none" stroke="rgba(176,96,255,0.18)" stroke-width="3"/>
-      <circle cx="100" cy="100" r="70" fill="none" stroke="rgba(255,96,192,0.13)" stroke-width="2"/>
-      <circle cx="100" cy="100" r="44" fill="none" stroke="rgba(176,96,255,0.12)" stroke-width="1.5"/>
-      <circle cx="100" cy="100" r="10" fill="rgba(176,96,255,0.25)" stroke="rgba(255,96,192,0.4)" stroke-width="2"/>
-      <!-- Spokes -->
-      <line x1="100" y1="4"   x2="100" y2="196" stroke="rgba(176,96,255,0.15)" stroke-width="1.5"/>
-      <line x1="4"   y1="100" x2="196" y2="100" stroke="rgba(176,96,255,0.15)" stroke-width="1.5"/>
-      <line x1="21"  y1="21"  x2="179" y2="179" stroke="rgba(255,96,192,0.12)" stroke-width="1.5"/>
-      <line x1="179" y1="21"  x2="21"  y2="179" stroke="rgba(255,96,192,0.12)" stroke-width="1.5"/>
-      <line x1="100" y1="4"   x2="100" y2="196" stroke="rgba(176,96,255,0.08)" stroke-width="1" transform="rotate(22.5 100 100)"/>
-      <line x1="100" y1="4"   x2="100" y2="196" stroke="rgba(176,96,255,0.08)" stroke-width="1" transform="rotate(67.5 100 100)"/>
-      <line x1="100" y1="4"   x2="100" y2="196" stroke="rgba(176,96,255,0.08)" stroke-width="1" transform="rotate(112.5 100 100)"/>
-      <line x1="100" y1="4"   x2="100" y2="196" stroke="rgba(176,96,255,0.08)" stroke-width="1" transform="rotate(157.5 100 100)"/>
-      <!-- Rim dots -->
-      <circle cx="100" cy="4"  r="3" fill="rgba(255,96,192,0.3)"/>
-      <circle cx="196" cy="100" r="3" fill="rgba(255,96,192,0.3)"/>
-      <circle cx="100" cy="196" r="3" fill="rgba(255,96,192,0.3)"/>
-      <circle cx="4"   cy="100" r="3" fill="rgba(255,96,192,0.3)"/>
-      <circle cx="29"  cy="29"  r="2.5" fill="rgba(176,96,255,0.25)"/>
-      <circle cx="171" cy="29"  r="2.5" fill="rgba(176,96,255,0.25)"/>
-      <circle cx="171" cy="171" r="2.5" fill="rgba(176,96,255,0.25)"/>
-      <circle cx="29"  cy="171" r="2.5" fill="rgba(176,96,255,0.25)"/>
-    </svg>
-  </div>
   <h1 class="page-title">🏪 Market
     <span class="badge-count">{{ total }}</span>
   </h1>
@@ -70,12 +44,12 @@
   <div class="search-wrap">
     <span class="search-icon">🔍</span>
     <input type="text" name="q" value="{{ search }}"
-           placeholder="Search name or anime…" class="search-input" id="searchInput">
+           aria-label="Search characters by name or anime" maxlength="100" placeholder="Search name or anime…" class="search-input" id="searchInput">
     {% if search %}
-    <button type="button" class="search-clear" onclick="document.getElementById('searchInput').value='';document.getElementById('filterForm').submit()">✕</button>
+    <button type="button" class="search-clear" aria-label="Clear search" onclick="document.getElementById('searchInput').value='';document.getElementById('filterForm').submit()">✕</button>
     {% endif %}
   </div>
-  <select name="rarity" class="rarity-select" onchange="this.form.submit()">
+  <select aria-label="Filter by rarity" name="rarity" class="rarity-select" onchange="this.form.submit()">
     <option value="">All rarities</option>
     {% for r in rarities %}
     <option value="{{ r }}" {% if rarity == r %}selected{% endif %}>{{ r }}</option>
@@ -107,7 +81,7 @@
            class="char-img"
            decoding="async"
            {% if loop.index > 6 %}loading="lazy"{% else %}fetchpriority="high"{% endif %}
-           onerror="this.onerror=null;this.src='/static/img/no_image.png';this.classList.add('img-ready');this.closest('.char-img-wrap')?.classList.add('loaded');">
+           onerror="this.onerror=null;this.src='/static/img/card-placeholder.svg';this.classList.add('img-ready');this.closest('.char-img-wrap')?.classList.add('loaded');">
       {% endif %}
       <div class="rarity-badge rarity-{{ lst.char.rarity | replace(' ','_') | replace('️','') }}">
         {{ lst.char.rarity }}

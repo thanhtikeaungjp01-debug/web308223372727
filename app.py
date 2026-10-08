@@ -12,9 +12,13 @@ import os
 import time
 import random
 import secrets
+import tempfile
 import urllib.parse
 from PIL import Image
 from functools import lru_cache
+from threading import Lock
+from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import requests as _req
 from flask import (Flask, render_template, request, session, redirect,
@@ -22,20 +26,40 @@ from flask import (Flask, render_template, request, session, redirect,
 
 try:
     from web.db          import get_db, reset_db, usd, is_sellable, RARITY_VALUE, DAILY_RARITY_KEYS, DAILY_RARITY_UNLIMITED, _ago, LIST_FEE
-    from web.auth        import verify_telegram_login, set_bot_token, login_required, api_login_required
+    from web.auth        import verify_telegram_login, verify_webapp_data, valid_user_id, set_bot_token, login_required, api_login_required
     from web.config_store import get as _cfg, get_int as _cfg_int, save as _cfg_save, \
                                   reload as _cfg_reload, is_configured, all_config
 except ModuleNotFoundError:
     from db          import get_db, reset_db, usd, is_sellable, RARITY_VALUE, DAILY_RARITY_KEYS, DAILY_RARITY_UNLIMITED, _ago, LIST_FEE  # type: ignore
-    from auth        import verify_telegram_login, set_bot_token, login_required, api_login_required  # type: ignore
+    from auth        import verify_telegram_login, verify_webapp_data, valid_user_id, set_bot_token, login_required, api_login_required  # type: ignore
     from config_store import get as _cfg, get_int as _cfg_int, save as _cfg_save, \
                                   reload as _cfg_reload, is_configured, all_config  # type: ignore
 
+IS_VERCEL = os.environ.get("VERCEL") == "1"
+if IS_VERCEL:
+    required = ("MONGO_URI", "BOT_TOKEN", "BOT_USERNAME", "OWNER_ID", "SESSION_SECRET")
+    missing = [key for key in required if not os.environ.get(key, "").strip()]
+    if missing:
+        raise RuntimeError("Set Vercel environment variables: " + ", ".join(missing))
+    if len(os.environ["SESSION_SECRET"].strip()) < 32:
+        raise RuntimeError("SESSION_SECRET must contain at least 32 random characters.")
+    if not valid_user_id(os.environ["OWNER_ID"]):
+        raise RuntimeError("OWNER_ID must be a positive Telegram user ID.")
+
 app = Flask(__name__, template_folder="templates", static_folder="static")
+if IS_VERCEL or os.environ.get("TRUST_PROXY") == "1":
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
 # Keep CSS/JS/images in the browser cache so repeated page switches do not
 # redownload the same assets. The moderate TTL avoids stale deploys.
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 3600
 app.secret_key = os.environ.get("SESSION_SECRET", os.urandom(32))
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=IS_VERCEL or os.environ.get("SESSION_COOKIE_SECURE", "0") == "1",
+    MAX_CONTENT_LENGTH=(4 * 1024 * 1024 + 64 * 1024) if IS_VERCEL else 32 * 1024 * 1024,
+)
 app.permanent_session_lifetime = 60 * 60 * 24 * 30
 MAX_ACTIVE_USERS = 8
 PRESENCE_TTL_SECONDS = 45
@@ -105,6 +129,16 @@ AUCTION_MIN_PRICE = {
 }
 
 
+@app.url_defaults
+def version_static_assets(endpoint, values):
+    if endpoint == "static" and "filename" in values:
+        path = os.path.join(app.static_folder, values["filename"])
+        try:
+            values.setdefault("v", str(os.stat(path).st_mtime_ns))
+        except OSError:
+            pass
+
+
 # ── dynamic config helpers (read fresh on every call) ─────────────────────────
 
 def _bot_token()    -> str:  return _cfg("BOT_TOKEN")
@@ -119,14 +153,17 @@ def _refresh_auth():
 
 _refresh_auth()
 
-# Every process restart begins in maintenance mode. This is persisted so a
-# restart cannot accidentally expose a half-started site; the owner can turn it
-# off from Admin after the app is ready. Keep setup usable when not configured.
-if is_configured():
-    _cfg_save({"MAINTENANCE_MODE": "1"})
+# Maintenance is an explicit owner setting; cold starts never change it.
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
+def _nonnegative_int(value, default=0):
+    try:
+        return max(0, int(value))
+    except (ValueError, TypeError, OverflowError):
+        return default
+
 
 def current_user() -> dict | None:
     if "user_id" not in session:
@@ -142,8 +179,10 @@ def current_user() -> dict | None:
 
 
 def _safe_next_url(value: str | None, fallback: str = "/market") -> str:
+    if not isinstance(value, (str, type(None))):
+        return fallback
     value = (value or "").strip()
-    if not value.startswith("/") or value.startswith("//"):
+    if not value.startswith("/") or value.startswith("//") or "\\" in value or any(ord(c) < 32 for c in value):
         return fallback
     return value
 
@@ -265,8 +304,8 @@ def media_url(value, fallback: str | None = None, hint: str = "") -> str | None:
 
 
 def char_img_url(img_url: str) -> str:
-    return media_url(img_url, url_for("static", filename="img/no_image.png")) or url_for(
-        "static", filename="img/no_image.png"
+    return media_url(img_url, url_for("static", filename="img/card-placeholder.svg")) or url_for(
+        "static", filename="img/card-placeholder.svg"
     )
 
 
@@ -297,7 +336,7 @@ def _format_char_media(char: dict) -> dict:
             "char_video": media_url(video_ref, None),
         }
     return {
-        "char_img": media_url(image_ref, url_for("static", filename="img/no_image.png")),
+        "char_img": media_url(image_ref, url_for("static", filename="img/card-placeholder.svg")),
         "char_video": "",
     }
 
@@ -329,10 +368,10 @@ def inject_site_logo():
         "card_update_show": False,
     }
     try:
-        logo = get_db().get_logo()
+        logo = get_db().get_logo(include_data=False)
         if logo:
             context["site_logo_url"] = url_for("site_logo")
-        ad_banner = get_db().get_ad_banner()
+        ad_banner = get_db().get_ad_banner(include_data=False)
         if ad_banner:
             context["ad_banner_url"] = url_for("ad_banner_media")
             context["ad_banner_is_video"] = str(ad_banner.get("mime", "")).lower().startswith("video/")
@@ -360,13 +399,57 @@ def _fmt_listing(lst: dict) -> dict:
 
 # ── before_request: show maintenance page if not configured ──────────────────
 
+def _csrf_token():
+    return session.setdefault("csrf_token", secrets.token_urlsafe(32))
+
+
+app.jinja_env.globals["csrf_token"] = _csrf_token
+
+
+@app.before_request
+def protect_requests():
+    if request.is_json and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify(ok=False, error="Expected a JSON object"), 400
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return
+    if request.endpoint == "api_internal_rarity_gate":
+        return  # This endpoint validates its own bot API key.
+    if request.headers.get("Sec-Fetch-Site") == "cross-site":
+        return jsonify(ok=False, error="Cross-site request denied"), 403
+    origin = request.headers.get("Origin")
+    if origin:
+        try:
+            allowed_origin = urllib.parse.urlsplit(origin).netloc == request.host
+        except ValueError:
+            allowed_origin = False
+        if not allowed_origin:
+            return jsonify(ok=False, error="Cross-site request denied"), 403
+    if request.endpoint == "webapp_auth":
+        return  # Telegram HMAC authenticates the login payload.
+    expected = session.get("csrf_token", "")
+    submitted = request.headers.get("X-CSRF-Token") or request.form.get("csrf_token", "")
+    if not expected or not hmac.compare_digest(expected.encode(), submitted.encode()):
+        return jsonify(ok=False, error="Your session changed. Refresh the page and try again."), 403
+
+
+@app.after_request
+def security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if request.endpoint not in {"static", "media_proxy", "proxy_image", "site_logo", "welcome_media", "ad_banner_media", "healthz"}:
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.before_request
 def _check_setup():
     exempt = {"setup", "static", "maintenance", "healthz", "bot_status",
               "proxy_image", "media_proxy", "site_logo", "capacity_status",
               "capacity_release", "bot_auth", "telegram_auth", "webapp_auth",
               "logout", "index", "verify_gate"}
-    if request.endpoint in exempt:
+    if request.endpoint is None or request.endpoint in exempt:
         return
     # The owner must still be able to enter the Mini App and open Admin while
     # the public site is being configured or temporarily maintained. This is
@@ -374,8 +457,12 @@ def _check_setup():
     # immediately before redirecting to /market.
     owner_session = is_owner()
     if not is_configured() and not owner_session:
+        if request.path.startswith("/api/"):
+            return jsonify(ok=False, error="The market is being configured. Please try again later."), 503
         return render_template("maintenance.html"), 503
     if _cfg("MAINTENANCE_MODE", "0") == "1" and not owner_session:
+        if request.path.startswith("/api/"):
+            return jsonify(ok=False, error="The market is under maintenance. Please try again later."), 503
         return render_template("maintenance.html", maintenance_mode=True), 503
     if "user_id" in session and request.endpoint not in {"index", "bot_auth", "telegram_auth", "webapp_auth", "logout", "verify_gate"}:
         db = get_db()
@@ -387,7 +474,7 @@ def _check_setup():
                                 "active": db.active_presence_count(), "limit": MAX_ACTIVE_USERS}), 429
             return render_template("capacity_wait.html", active=db.active_presence_count(), limit=MAX_ACTIVE_USERS), 429
     # track unique daily visitors (skip bots/API calls)
-    if request.method == "GET" and request.endpoint not in {"proxy_image", "site_logo", "bot_status", "api_bot_status"}:
+    if request.method == "GET" and not request.path.startswith("/api/") and request.endpoint not in {"proxy_image", "site_logo", "bot_status", "api_bot_status"}:
         try:
             ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
             if ip:
@@ -398,15 +485,15 @@ def _check_setup():
 
 # ── image proxy (with disk cache) ─────────────────────────────────────────────
 
-_MEDIA_CACHE_DIR = os.path.join(os.path.dirname(__file__), "data", "media_cache")
+_MEDIA_CACHE_DIR = os.path.join(tempfile.gettempdir(), "waifu-media-cache") if IS_VERCEL else os.path.join(os.path.dirname(__file__), "data", "media_cache")
 os.makedirs(_MEDIA_CACHE_DIR, exist_ok=True)
-_MAX_MEDIA_BYTES = 256 * 1024 * 1024
-_MAX_MEDIA_CACHE_BYTES = 1024 * 1024 * 1024
+_MAX_MEDIA_BYTES = (4 if IS_VERCEL else 256) * 1024 * 1024
+_MAX_MEDIA_CACHE_BYTES = (128 if IS_VERCEL else 1024) * 1024 * 1024
 
-_NO_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "static", "img", "no_image.png")
+_NO_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "static", "img", "card-placeholder.svg")
 
 def _serve_no_image():
-    resp = send_file(_NO_IMAGE_PATH, mimetype="image/png")
+    resp = send_file(_NO_IMAGE_PATH, mimetype="image/svg+xml")
     resp.headers["Cache-Control"] = "public, max-age=300"
     return resp
 
@@ -463,7 +550,8 @@ def _serve_cached_media(ref: str):
 
     if os.path.exists(cache_file) and os.path.exists(meta_file):
         try:
-            ct = open(meta_file).read().strip()
+            with open(meta_file) as metadata:
+                ct = metadata.read().strip()
             os.utime(cache_file, None)  # atime is the LRU signal
             resp = send_file(cache_file, mimetype=ct, conditional=True, max_age=604800)
             resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
@@ -475,7 +563,8 @@ def _serve_cached_media(ref: str):
     url = ref if ref.startswith(("http://", "https://")) else (info or {}).get("url")
     if not url:
         return _serve_no_image()
-    temp_file = f"{cache_file}.tmp.{os.getpid()}"
+    temp_file = f"{cache_file}.tmp.{secrets.token_hex(12)}"
+    r = None
     try:
         r = _req.get(url, stream=True, timeout=(6, 30))
         if r.status_code != 200:
@@ -507,6 +596,9 @@ def _serve_cached_media(ref: str):
         except OSError:
             pass
         return _serve_no_image()
+    finally:
+        if r is not None:
+            r.close()
 
 
 @app.route("/media/<token>")
@@ -540,7 +632,15 @@ def setup():
                   "OWNER_ID", "DB_NAME", "BOT_API_URL", "BOT_API_KEY"]
         data = {k: request.form.get(k, "").strip() for k in fields}
 
-        if not data["MONGO_URI"] or not data["BOT_TOKEN"] or not data["OWNER_ID"]:
+        for key in ("MONGO_URI", "BOT_TOKEN", "BOT_API_KEY"):
+            if not data[key] or data[key] == "set":
+                data[key] = _cfg(key)
+        setup_key = os.environ.get("SETUP_KEY", "")
+        if not configured and (not setup_key or not secrets.compare_digest(request.form.get("setup_key", "").encode(), setup_key.encode())):
+            error = "Enter the setup key configured by the site operator."
+        elif not valid_user_id(data["OWNER_ID"]):
+            error = "Owner ID must be a positive numeric Telegram ID."
+        elif not data["MONGO_URI"] or not data["BOT_TOKEN"] or not data["OWNER_ID"]:
             error = "MONGO_URI, BOT_TOKEN and OWNER_ID are required."
         else:
             _cfg_save({k: v for k, v in data.items() if v})
@@ -567,8 +667,6 @@ def setup():
 def bot_auth():
     token    = request.args.get("token", "").strip()
     next_url = _safe_next_url(request.args.get("next"), "/")
-    if next_url == "/market":
-        next_url = "/"
     if not token:
         return redirect(url_for("index") + "?error=1")
 
@@ -586,10 +684,13 @@ def bot_auth():
     if not doc:
         return redirect(url_for("index") + "?error=expired")
 
+    if not valid_user_id(doc.get("user_id")):
+        return redirect(url_for("index", error="expired"))
     uid   = int(doc["user_id"])
     fname = doc.get("first_name", "")
     uname = doc.get("username",   "")
     get_db().ensure_user(uid, fname, uname)
+    session.clear()
     session.permanent     = True
     session["user_id"]    = uid
     session["first_name"] = fname
@@ -601,67 +702,44 @@ def bot_auth():
 @app.route("/auth/telegram")
 def telegram_auth():
     data = dict(request.args)
+    next_url = _safe_next_url(session.pop("login_next", None), "/")
     if not verify_telegram_login(data):
         return redirect(url_for("index") + "?error=1")
     uid   = int(data["id"])
     fname = data.get("first_name", "")
     uname = data.get("username",   "")
     get_db().ensure_user(uid, fname, uname)
+    session.clear()
     session.permanent     = True
     session["user_id"]    = uid
     session["first_name"] = fname
     session["username"]   = uname
     session["photo_url"]  = data.get("photo_url", "")
-    next_url = _safe_next_url(data.get("next"), "/")
-    if next_url == "/market":
-        next_url = "/"
     return redirect(next_url)
 
 
 @app.route("/auth/webapp", methods=["POST"])
 def webapp_auth():
     """Validate Telegram Mini App initData and create a session."""
-    data = request.get_json(silent=True) or {}
-    init_data = data.get("initData", "").strip()
-    if not init_data:
-        return jsonify(ok=False, error="No initData"), 400
-
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(ok=False, error="Invalid login request"), 400
     token = _bot_token()
     if not token:
-        return jsonify(ok=False, error="Bot not configured"), 503
-
-    # --- validate HMAC-SHA256 per Telegram docs ---
-    params = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
-    check_hash = params.pop("hash", "")
-    data_check = "\n".join(f"{k}={v}" for k, v in sorted(params.items()))
-    secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
-    expected = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, check_hash):
-        return jsonify(ok=False, error="Invalid signature"), 403
-
-    try:
-        user_json = params.get("user", "{}")
-        tg_user   = json.loads(user_json)
-    except Exception:
-        return jsonify(ok=False, error="Bad user data"), 400
-
-    uid   = int(tg_user.get("id", 0))
-    fname = tg_user.get("first_name", "")
-    uname = tg_user.get("username",   "")
-    photo = tg_user.get("photo_url",  "")
-    if not uid:
-        return jsonify(ok=False, error="Missing user id"), 400
-
-    get_db().ensure_user(uid, fname, uname)
-    session.permanent     = True
-    session["user_id"]    = uid
-    session["first_name"] = fname
-    session["username"]   = uname
-    session["photo_url"]  = photo
-    return jsonify(ok=True, redirect=url_for("index"))
+        return jsonify(ok=False, error="Telegram login is not configured yet"), 503
+    tg_user = verify_webapp_data(data.get("initData"), token)
+    if not tg_user:
+        return jsonify(ok=False, error="Login expired or invalid. Reopen the app from Telegram."), 403
+    uid = int(tg_user["id"])
+    get_db().ensure_user(uid, tg_user.get("first_name", ""), tg_user.get("username", ""))
+    session.clear()
+    session.permanent = True
+    session.update(user_id=uid, first_name=tg_user.get("first_name", ""),
+                   username=tg_user.get("username", ""), photo_url=tg_user.get("photo_url", ""))
+    return jsonify(ok=True, redirect=_safe_next_url(data.get("next"), "/"))
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 def logout():
     presence_id = session.get("presence_id")
     if presence_id:
@@ -698,33 +776,13 @@ def capacity_release():
 @app.route("/verify", methods=["GET", "POST"])
 def verify_gate():
     return redirect(url_for("index"))
-    next_url = _safe_next_url(request.values.get("next"), "/")
-    challenge = session.get("robot_challenge")
-    if not challenge:
-        challenge = secrets.token_urlsafe(24)
-        session["robot_challenge"] = challenge
-    error = ""
-    if request.method == "POST":
-        submitted = str(request.form.get("challenge", ""))
-        if not hmac.compare_digest(submitted, str(challenge)):
-            error = "Please complete the verification and try again."
-        else:
-            session["robot_verified_at"] = time.time()
-            session.pop("robot_challenge", None)
-            # Public entry should land on the dashboard after verification;
-            # Market is opened from the dashboard action icons.
-            if next_url in {"/", "/market"}:
-                next_url = "/"
-            # The home route uses this marker to distinguish the redirect
-            # immediately after verification from a fresh site entry.
-            session["robot_verified_return"] = next_url
-            return redirect(next_url)
-    return render_template("verify.html", next_url=next_url, challenge=challenge, error=error)
 
 
 # ── pages ─────────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
+    if request.args.get("next"):
+        session["login_next"] = _safe_next_url(request.args.get("next"), "/")
     user = current_user()
     if user:
         stored = get_db().get_user(int(user["id"])) or {}
@@ -735,14 +793,14 @@ def index():
             experience = experience.get("level") or experience.get("lvl") or experience.get("value")
         explicit_level = user.get("experience_level") or user.get("experienceLevel") or user.get("expLevel") or user.get("level") or user.get("lvl") or user.get("user_level") or user.get("rank")
         raw_exp = user.get("xp") or user.get("exp") or experience or 0
-        user["level"] = int(explicit_level or (int(raw_exp) // 100 + 1) or 1)
+        user["level"] = max(1, _nonnegative_int(explicit_level, _nonnegative_int(raw_exp) // 100 + 1))
     balance_str = usd(get_db().get_balance(int(user["id"]))) if user else "0.00"
-    xp = int(user.get("xp", 0) or 0) if user else 0
+    xp = _nonnegative_int(user.get("xp", 0)) if user else 0
     level_progress = min(100, max(0, xp % 1000) / 10)
     return render_template(
         "index.html", bot_username=_bot_username(), user=user,
         balance_str=balance_str, level_progress=level_progress,
-        welcome_slides=[url_for("welcome_media", index=i) for i, _ in enumerate(get_db().get_welcome_slides())],
+        welcome_slides=[url_for("welcome_media", index=i) for i, _ in enumerate(get_db().get_welcome_slides(include_data=False))],
         is_owner=is_owner(),
     )
 
@@ -750,14 +808,15 @@ def index():
 @app.route("/market")
 def market():
     db       = get_db()
-    page     = max(1, int(request.args.get("page", 1)))
+    page     = max(1, request.args.get("page", 1, type=int))
     per_page = 20
     rarity   = request.args.get("rarity", "").strip() or None
-    search   = request.args.get("q",      "").strip() or None
-    skip     = (page - 1) * per_page
+    search   = request.args.get("q",      "").strip()[:100] or None
     total    = db.count_listings(rarity, search)
-    listings = [_fmt_listing(l) for l in db.get_listings(skip, per_page, rarity, search)]
     pages    = max(1, (total + per_page - 1) // per_page)
+    page     = min(page, pages)
+    skip     = (page - 1) * per_page
+    listings = [_fmt_listing(l) for l in db.get_listings(skip, per_page, rarity, search)]
     rarities = list(RARITY_VALUE.keys())
     return render_template(
         "market.html",
@@ -768,7 +827,7 @@ def market():
         wheel_show=db.get_wheel_show(),
         rocket_show=db.get_rocket_show(),
         card_update_show=db.get_card_update_show(),
-        welcome_slides=[url_for("welcome_media", index=i) for i, _ in enumerate(db.get_welcome_slides())],
+        welcome_slides=[url_for("welcome_media", index=i) for i, _ in enumerate(db.get_welcome_slides(include_data=False))],
     )
 
 def _settle_expired_auctions(db):
@@ -945,6 +1004,19 @@ def api_admin_settings():
               "SUPPORT_CHAT", "UPDATE_CHAT", "AD_BANNER_URL",
               "AD_BANNER_LINK", "BRAND_ANIMATION"]
     to_save = {k: str(data[k]).strip() for k in fields if k in data and str(data[k]).strip()}
+    for key, limit in (("SITE_TITLE", 40), ("SITE_SUBTITLE", 64)):
+        if key not in data:
+            continue
+        value = data[key]
+        if not isinstance(value, str):
+            return jsonify(ok=False, error="Brand text must be plain text."), 400
+        value = value.strip()
+        if len(value) > limit or any(ord(char) < 32 for char in value):
+            return jsonify(ok=False, error=f"{key} must be at most {limit} characters on one line."), 400
+        if key == "SITE_TITLE" and not value:
+            return jsonify(ok=False, error="App name is required."), 400
+        to_save[key] = value
+
     if not to_save:
         return jsonify({"ok": False, "error": "Nothing to save"})
     _cfg_save(to_save)
@@ -1115,7 +1187,7 @@ def api_transfer():
     to_val = str(data.get("to", "")).strip()
     try:
         amount = int(float(data.get("amount", 0)) * 100)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         return jsonify({"ok": False, "error": "Invalid amount"})
     if to_val.lstrip("@").isdigit():
         to_id  = int(to_val.lstrip("@"))
@@ -1165,8 +1237,9 @@ def api_admin_listings():
 
 ALLOWED_IMG = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 ALLOWED_AD_MEDIA = ALLOWED_IMG | {"video/mp4", "video/webm", "video/quicktime", "video/ogg"}
-MAX_AD_MEDIA_BYTES = 25 * 1024 * 1024
-MAX_WELCOME_UPLOAD_BYTES = 8 * 1024 * 1024
+MAX_AD_MEDIA_BYTES = (4 if IS_VERCEL else 25) * 1024 * 1024
+MAX_LOGO_UPLOAD_BYTES = (4 if IS_VERCEL else 5) * 1024 * 1024
+MAX_WELCOME_UPLOAD_BYTES = (4 if IS_VERCEL else 8) * 1024 * 1024
 MAX_WELCOME_STORED_BYTES = 180 * 1024
 
 @app.route("/site-logo")
@@ -1175,8 +1248,9 @@ def site_logo():
         logo = get_db().get_logo()
         if logo:
             data = base64.b64decode(logo["data"])
-            resp = send_file(io.BytesIO(data), mimetype=logo["mime"])
-            resp.headers["Cache-Control"] = "public, max-age=3600"
+            resp = send_file(io.BytesIO(data), mimetype=logo["mime"],
+                             etag=hashlib.sha256(data).hexdigest())
+            resp.headers["Cache-Control"] = "public, no-cache"
             return resp
     except Exception:
         pass
@@ -1190,8 +1264,20 @@ def admin_logo_upload():
     f = request.files.get("logo")
     if not f or not f.content_type or f.content_type not in ALLOWED_IMG:
         return jsonify({"ok": False, "error": "Invalid file"})
-    data_b64 = base64.b64encode(f.read()).decode()
-    get_db().set_logo(data_b64, f.content_type)
+    raw = f.read(MAX_LOGO_UPLOAD_BYTES + 1)
+    if len(raw) > MAX_LOGO_UPLOAD_BYTES:
+        return jsonify(ok=False, error=f"Logo must be {MAX_LOGO_UPLOAD_BYTES // (1024 * 1024)} MB or smaller."), 400
+    try:
+        with Image.open(io.BytesIO(raw)) as logo:
+            if logo.width * logo.height > 25_000_000:
+                return jsonify(ok=False, error="Logo dimensions are too large."), 400
+            logo.thumbnail((512, 512))
+            output = io.BytesIO()
+            logo.convert("RGBA").save(output, format="WEBP", quality=88)
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return jsonify(ok=False, error="Choose a valid PNG, JPEG, GIF or WebP image."), 400
+    data_b64 = base64.b64encode(output.getvalue()).decode()
+    get_db().set_logo(data_b64, "image/webp")
     return jsonify({"ok": True, "url": url_for("site_logo")})
 
 
@@ -1222,9 +1308,9 @@ def admin_welcome_upload():
     f = request.files.get("welcome")
     if not f or f.content_type not in ALLOWED_IMG:
         return jsonify({"ok": False, "error": "Please upload a PNG, JPG, GIF, or WebP image."})
-    raw = f.read()
+    raw = f.read(MAX_WELCOME_UPLOAD_BYTES + 1)
     if not raw or len(raw) > MAX_WELCOME_UPLOAD_BYTES:
-        return jsonify({"ok": False, "error": "Image is empty or larger than 8 MB."})
+        return jsonify({"ok": False, "error": f"Image is empty or larger than {MAX_WELCOME_UPLOAD_BYTES // (1024 * 1024)} MB."})
     try:
         image = Image.open(io.BytesIO(raw)).convert("RGB")
         image.thumbnail((1400, 700), Image.Resampling.LANCZOS)
@@ -1260,6 +1346,8 @@ def ad_banner_media():
         ad = get_db().get_ad_banner()
         if ad:
             data = base64.b64decode(ad["data"])
+            if IS_VERCEL and len(data) > _MAX_MEDIA_BYTES:
+                return _serve_no_image()
             resp = send_file(io.BytesIO(data), mimetype=ad["mime"])
             resp.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=60"
             return resp
@@ -1275,11 +1363,11 @@ def admin_ad_banner_upload():
     f = request.files.get("ad_banner")
     if not f or not f.content_type or f.content_type not in ALLOWED_AD_MEDIA:
         return jsonify({"ok": False, "error": "Please upload a valid image or video file."})
-    data = f.read()
+    data = f.read(MAX_AD_MEDIA_BYTES + 1)
     if not data:
         return jsonify({"ok": False, "error": "The uploaded file is empty."})
     if len(data) > MAX_AD_MEDIA_BYTES:
-        return jsonify({"ok": False, "error": "File is too large. Maximum size is 25 MB."})
+        return jsonify({"ok": False, "error": f"File is too large. Maximum size is {MAX_AD_MEDIA_BYTES // (1024 * 1024)} MB."})
     data_b64 = base64.b64encode(data).decode()
     get_db().set_ad_banner(data_b64, f.content_type)
     return jsonify({"ok": True, "url": url_for("ad_banner_media"), "mime": f.content_type})
@@ -1297,23 +1385,31 @@ def admin_ad_banner_delete():
 
 # ── bot status ────────────────────────────────────────────────────────────────
 
+_bot_status_cache = {}
+_bot_status_lock = Lock()
+
+
 @app.route("/bot-status")
 def bot_status():
-    api_url = _bot_api_url()
-    api_key = _bot_api_key()
+    api_url, api_key = _bot_api_url(), _bot_api_key()
     if not api_url or not api_key:
-        return jsonify({"online": False, "reason": "not_configured"})
-    try:
-        r = _req.get(
-            f"{api_url}/api/ping",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=5,
-        )
-        if r.status_code == 200:
-            return jsonify({"online": True})
-    except Exception:
-        pass
-    return jsonify({"online": False, "reason": "unreachable"})
+        return jsonify(online=False, reason="not_configured")
+    cache_key = (api_url, api_key)
+    with _bot_status_lock:
+        cached = _bot_status_cache.get(cache_key)
+        if cached and time.monotonic() - cached[0] < 30:
+            return jsonify(cached[1])
+        result = {"online": False, "reason": "unreachable"}
+        try:
+            response = _req.get(f"{api_url}/api/ping",
+                               headers={"Authorization": f"Bearer {api_key}"}, timeout=5)
+            if response.status_code == 200:
+                result = {"online": True}
+        except _req.RequestException:
+            pass
+        _bot_status_cache.clear()
+        _bot_status_cache[cache_key] = (time.monotonic(), result)
+    return jsonify(result)
 
 
 # ── Rocket game ───────────────────────────────────────────────────────────────
@@ -1797,6 +1893,21 @@ def api_admin_delete_code(code_id):
         return jsonify({"ok": False, "error": "Unauthorized"}), 403
     get_db().delete_redeem_code(code_id)
     return jsonify({"ok": True})
+
+
+@app.errorhandler(HTTPException)
+def http_error(error):
+    if request.path.startswith(("/api/", "/auth/", "/admin/")):
+        return jsonify(ok=False, error=error.description), error.code
+    return render_template("error.html", user=current_user(), status=error.code,
+                           message=error.description), error.code
+
+
+@app.context_processor
+def upload_limits():
+    return {"logo_upload_mb": MAX_LOGO_UPLOAD_BYTES // (1024 * 1024),
+            "welcome_upload_mb": MAX_WELCOME_UPLOAD_BYTES // (1024 * 1024),
+            "ad_upload_mb": MAX_AD_MEDIA_BYTES // (1024 * 1024)}
 
 
 # ── deployment health check ───────────────────────────────────────────────────

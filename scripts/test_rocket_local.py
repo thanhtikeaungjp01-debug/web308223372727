@@ -1,11 +1,12 @@
 import sys
 import time
+import tempfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import db
 
-root = Path('/tmp/waifu-rocket-test')
-root.mkdir(exist_ok=True)
+fixture = tempfile.TemporaryDirectory(prefix='waifu-rocket-test-')
+root = Path(fixture.name)
 old_dir = db.LocalWebDB._DIR
 db.LocalWebDB._DIR = root
 try:
@@ -26,3 +27,4 @@ try:
     print('rocket local storage: ok')
 finally:
     db.LocalWebDB._DIR = old_dir
+    fixture.cleanup()

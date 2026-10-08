@@ -1,10 +1,23 @@
+/* All same-origin writes carry the session's CSRF token, including uploads. */
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input, options = {}) => {
+  const url = new URL(input instanceof Request ? input.url : input, location.href);
+  const method = (options.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+  if (url.origin === location.origin && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    const headers = new Headers(options.headers || (input instanceof Request ? input.headers : undefined));
+    const token = document.querySelector('meta[name="csrf-token"]')?.content;
+    if (token) headers.set('X-CSRF-Token', token);
+    options = { ...options, headers };
+  }
+  return nativeFetch(input, options);
+};
+
 /* ── Telegram Mini App init ──────────────────────────────────────────────── */
-(function () {
+document.addEventListener('DOMContentLoaded', function () {
   const tg = window.Telegram?.WebApp;
   if (!tg || !tg.initData) return;          // not inside Telegram — skip
 
   tg.ready();
-  tg.expand();
 
   // Already logged in → nothing to do
   const metaLoggedIn = document.querySelector('meta[name="tg-logged-in"]');
@@ -14,18 +27,29 @@
   fetch('/auth/webapp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ initData: tg.initData }),
+    body: JSON.stringify({ initData: tg.initData, next: new URLSearchParams(location.search).get('next') || location.pathname }),
+    signal: AbortSignal.timeout(15000),
   })
     .then(r => r.json())
-    .then(d => { if (d.ok) window.location.href = d.redirect || '/market'; })
-    .catch(() => {});
-})();
+    .then(d => {
+      if (d.ok) window.location.href = d.redirect || '/';
+      else reportLoginError(d.error || 'Unable to sign in. Please reopen the app from Telegram.');
+    })
+    .catch(() => reportLoginError('Unable to connect. Please reopen the app from Telegram.'));
+});
+
+function reportLoginError(message) {
+  const status = document.getElementById('auth-status');
+  if (status) status.textContent = message;
+  else showToast(message, 'error', 8000);
+}
 
 /* ── Bot status dot ──────────────────────────────────────────────────────── */
 (function () {
   const dot = document.getElementById('botStatusDot');
   if (!dot) return;
   function check() {
+    if (document.hidden) return;
     fetch('/bot-status')
       .then(r => r.json())
       .then(d => {
@@ -48,42 +72,6 @@
   setInterval(check, 60000);
 })();
 
-/* ── Page loader ─────────────────────────────────────────────────────────── */
-function _hideLoader() {
-  const loader = document.getElementById('page-loader');
-  if (loader && !loader.classList.contains('hidden')) {
-    loader.classList.add('hidden');
-  }
-}
-// Hide as soon as DOM + scripts are ready (don't wait for slow images)
-document.addEventListener('DOMContentLoaded', _hideLoader);
-// Absolute fallback: force-hide after 3 s no matter what
-setTimeout(_hideLoader, 3000);
-// Also honour the original load event if it fires sooner
-window.addEventListener('load', _hideLoader);
-window.addEventListener('pageshow', _hideLoader);
-
-/* ── Fast internal navigation prefetch ───────────────────────────────────── */
-(() => {
-  const prefetched = new Set();
-  const warm = (link) => {
-    if (!link || !link.href || link.target || link.origin !== location.origin) return;
-    if (prefetched.has(link.href)) return;
-    const path = new URL(link.href).pathname;
-    if (!['/', '/market', '/auction', '/wallet', '/admin', '/rocket', '/harem'].includes(path)) return;
-    prefetched.add(link.href);
-    const hint = document.createElement('link');
-    hint.rel = 'prefetch';
-    hint.as = 'document';
-    hint.href = link.href;
-    document.head.appendChild(hint);
-  };
-  document.querySelectorAll('a[href]').forEach(link => {
-    link.addEventListener('pointerenter', () => warm(link), { once: true, passive: true });
-    link.addEventListener('touchstart', () => warm(link), { once: true, passive: true });
-  });
-})();
-
 /* ── Mobile nav toggle ───────────────────────────────────────────────────── */
 const navToggle  = document.getElementById('navToggle');
 const mobileMenu = document.getElementById('mobileMenu');
@@ -93,6 +81,7 @@ if (navToggle && mobileMenu) {
     navToggle.setAttribute('aria-expanded', String(open));
     navToggle.setAttribute('aria-label', open ? 'Close main menu' : 'Open main menu');
     mobileMenu.setAttribute('aria-hidden', String(!open));
+    mobileMenu.inert = !open;
   };
   navToggle.addEventListener('click', () => {
     setMenuOpen(!mobileMenu.classList.contains('open'));
@@ -113,7 +102,7 @@ if (navToggle && mobileMenu) {
     }
   });
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') setMenuOpen(false);
+    if (e.key === 'Escape' && mobileMenu.classList.contains('open')) { setMenuOpen(false); navToggle.focus(); }
   });
 }
 
@@ -132,27 +121,40 @@ function showToast(msg, type = 'info', duration = 3500) {
 }
 
 /* ── Modal helpers ───────────────────────────────────────────────────────── */
+let activeModal = null;
+let modalOpener = null;
 function showModal(id) {
   const el = document.getElementById(id);
-  if (el) { el.style.display = 'flex'; document.body.style.overflow = 'hidden'; }
+  if (!el) return;
+  modalOpener = document.activeElement;
+  activeModal = el;
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-modal', 'true');
+  el.setAttribute('aria-label', el.querySelector('.modal-title')?.textContent || 'Confirm action');
+  el.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  (el.querySelector('button, input, select, [tabindex="0"]') || el).focus();
 }
 function closeModal(id) {
   const el = document.getElementById(id);
-  if (el) { el.style.display = 'none'; document.body.style.overflow = ''; }
+  if (!el) return;
+  el.style.display = 'none';
+  document.body.style.overflow = '';
+  activeModal = null;
+  if (modalOpener?.isConnected) modalOpener.focus();
 }
 
 document.addEventListener('click', e => {
-  if (e.target.classList.contains('modal-overlay')) {
-    e.target.style.display = 'none';
-    document.body.style.overflow = '';
-  }
+  if (e.target.classList.contains('modal-overlay')) closeModal(e.target.id);
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') {
-    document.querySelectorAll('.modal-overlay').forEach(m => {
-      m.style.display = 'none';
-    });
-    document.body.style.overflow = '';
+  if (!activeModal) return;
+  if (e.key === 'Escape') closeModal(activeModal.id);
+  if (e.key === 'Tab') {
+    const controls = [...activeModal.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]')].filter(el => el.getClientRects().length);
+    const first = controls[0], last = controls[controls.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
   }
 });
 
@@ -185,32 +187,26 @@ async function withLock(btnOrKey, fn) {
 }
 
 /* ── API helpers ─────────────────────────────────────────────────────────── */
-async function apiPost(url, body = {}) {
+async function apiRequest(url, options = {}) {
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (res.status === 401) return { ok: false, error: 'Not logged in — please refresh and login again.' };
-    if (res.status === 403) return { ok: false, error: 'Permission denied.' };
-    if (!res.ok && res.status >= 500) return { ok: false, error: `Server error (${res.status})` };
-    return await res.json();
+    const res = await fetch(url, { ...options, signal: AbortSignal.timeout(20000) });
+    const json = res.headers.get('Content-Type')?.includes('application/json');
+    const data = json ? await res.json() : null;
+    if (res.status === 401) return { ok: false, error: 'Please sign in with Telegram to continue.' };
+    if (!res.ok) return { ok: false, error: data?.error || `Unable to complete the request (${res.status}). Please try again.` };
+    return data || { ok: false, error: 'Unexpected response. Please refresh the page.' };
   } catch (err) {
-    console.error('apiPost error:', err);
-    return { ok: false, error: 'Network error — check your connection.' };
+    return { ok: false, error: err.name === 'TimeoutError'
+      ? 'The request timed out. Check your balance or activity before trying again.'
+      : 'Connection lost. Check your activity before retrying a purchase or transfer.' };
   }
 }
 
-async function apiGet(url) {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-    return await res.json();
-  } catch (err) {
-    return { ok: false, error: 'Network error' };
-  }
+async function apiPost(url, body = {}) {
+  return apiRequest(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 }
+
+async function apiGet(url) { return apiRequest(url); }
 
 /* ── Char images: shimmer skeleton + fade-in ─────────────────────────────── */
 function _imgReady(img) {
@@ -238,18 +234,3 @@ document.querySelectorAll('video.char-video').forEach(video => {
     video.addEventListener('error', markVideoReady, { once: true });
   }
 });
-
-/* ── Ad banner close ─────────────────────────────────────────────────────── */
-const adCloseBtn = document.getElementById('adBannerClose');
-if (adCloseBtn) {
-  adCloseBtn.addEventListener('click', () => {
-    const banner = document.getElementById('adBanner');
-    if (banner) banner.style.display = 'none';
-    sessionStorage.setItem('ad_closed', '1');
-  });
-  // Restore closed state within the session
-  if (sessionStorage.getItem('ad_closed')) {
-    const banner = document.getElementById('adBanner');
-    if (banner) banner.style.display = 'none';
-  }
-}

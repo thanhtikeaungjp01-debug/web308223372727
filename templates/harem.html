@@ -30,7 +30,7 @@
         <tr id="listing-row-{{ lst._id_str }}">
           <td class="td-char">
             <img src="{{ lst.char_img }}" alt="" class="table-char-img"
-                 onerror="this.src='/static/img/no_image.png'">
+                 onerror="this.onerror=null;this.src='/static/img/card-placeholder.svg'">
             <span>{{ lst.char.name }}</span>
           </td>
           <td>{{ lst.char.rarity }}</td>
@@ -93,7 +93,7 @@
       </video>
       {% else %}
       <img src="{{ c.char_img or c.img }}" alt="{{ c.name }}" class="char-img" loading="lazy"
-           onerror="this.src='/static/img/no_image.png'">
+           onerror="this.onerror=null;this.src='/static/img/card-placeholder.svg'">
       {% endif %}
       <div class="rarity-badge">{{ c.rarity }}</div>
       {% if c.count > 1 %}

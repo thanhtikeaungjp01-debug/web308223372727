@@ -17,7 +17,7 @@
   <article class="char-card auction-card" data-lid="{{ lst._id_str }}">
     <div class="char-img-wrap">
       {% if lst.char_video %}<video src="{{ lst.char_video }}" class="char-img char-video" controls playsinline preload="metadata" {% if lst.char_img %}poster="{{ lst.char_img }}"{% endif %}></video>
-      {% else %}<img src="{{ lst.char_img }}" alt="{{ lst.char.name }}" class="char-img" loading="lazy" onerror="this.onerror=null;this.src='/static/img/no_image.png';">{% endif %}
+      {% else %}<img src="{{ lst.char_img }}" alt="{{ lst.char.name }}" class="char-img" loading="lazy" onerror="this.onerror=null;this.src='/static/img/card-placeholder.svg';">{% endif %}
       <div class="rarity-badge">{{ lst.char.rarity }}</div>
     </div>
     <div class="char-info"><div class="char-name">{{ lst.char.name }}</div><div class="char-anime">{{ lst.char.anime }}</div><div class="listing-meta"><span>👤 {{ lst.seller_name }}</span><span>⏱ 24h</span></div></div>
