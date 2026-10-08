@@ -144,12 +144,80 @@ class LoadingHistoryTests(unittest.TestCase):
         self.fixture.identify(42)
         self.assertNotIn(b'History Card', self.client.get('/auction?tab=wins').data)
 
-    def test_transaction_insert_never_deletes_shared_history(self):
+    def test_wins_keep_last_ten_without_deleting_other_history(self):
+        self.store.log_transaction('transfer', 42, 43, 100)
+        self.store.log_transaction('auction_sale', 43, 42, 100)
+        for i in range(12):
+            self.store.log_transaction('auction_sale', 42, 44, 100, {'char': {'id': i, 'name': f'Win {i}'}})
+        wins = self.store.get_auction_wins(42)
+        self.assertEqual([row['details']['char']['id'] for row in wins], list(range(11, 1, -1)))
+        self.assertEqual(len(self.store.get_auction_wins(43)), 1)
+        self.assertEqual(len(self.store._load('transactions')), 12)
+        self.assertEqual(self.store.get_auction_wins(42, skip=10), [])
+        self.assertEqual(self.store.get_balance(42), 100000)
+
+    def test_mongo_pruning_is_scoped_to_old_wins_for_one_user(self):
         mongo = object.__new__(db.MongoWebDB); mongo._tx = Mock()
-        mongo.log_transaction('auction_sale', 42, 43, 100, {'char':{'id':1}})
-        mongo._tx.insert_one.assert_called_once()
-        mongo._tx.delete_many.assert_not_called()
+        mongo._tx.find.return_value.sort.return_value.skip.return_value = [{'_id': 'old-win'}]
+        mongo.log_transaction('auction_sale', 42, 43, 100)
+        mongo._tx.delete_many.assert_called_once_with({
+            'type': 'auction_sale', 'from_id': 42, '_id': {'$in': ['old-win']}})
+        mongo._tx.reset_mock()
+        mongo.log_transaction('transfer', 42, 43, 100)
         mongo._tx.find.assert_not_called()
+        mongo._tx.delete_many.assert_not_called()
+
+    def test_profile_level_uses_database_not_session_default(self):
+        user = self.store._load('users')['42']
+        for data in ({'lvl': 2345}, {'user_level': '2345'}, {'experience': {'level': 2345}},
+                     {'level': 'Collector', 'lvl': 2345}, {'level': 2345}):
+            for key in ('level', 'lvl', 'user_level', 'experience'): user.pop(key, None)
+            user.update(data)
+            self.assertIn(b'<strong>2345</strong>', self.client.get('/').data)
+        for key in ('level', 'lvl', 'user_level', 'experience'): user.pop(key, None)
+        self.assertIn(b'Level unavailable', self.client.get('/').data)
+
+    def test_market_and_auction_are_separate_including_purchase_endpoints(self):
+        fixed = self.store.add_listing(43, 'Seller', {'id': 21, 'name': 'Fixed Only'}, 100)
+        legacy = self.store.add_listing(43, 'Seller', {'id': 22, 'name': 'Legacy Fixed'}, 100)
+        self.store._load('market')[legacy].pop('listing_type')
+        auction = self.store.add_listing(43, 'Seller', {'id': 23, 'name': 'Auction Only'}, 100, 'auction', time.time()+3600)
+        market = self.client.get('/market').data
+        self.assertIn(b'Fixed Only', market)
+        self.assertIn(b'Legacy Fixed', market)
+        self.assertNotIn(b'Auction Only', market)
+        self.assertEqual(self.store.count_listings(listing_type='fixed'), 2)
+        self.assertNotIn(b'Fixed Only', self.client.get('/auction').data)
+        self.assertIn(b'Auction Only', self.client.get('/auction').data)
+        self.assertFalse(self.store.buy_listing(auction, 42, 'Buyer')['ok'])
+        self.assertFalse(self.store.lucky_buy_listing(auction, 42, 'Buyer', 44, 500)['ok'])
+        self.assertEqual(self.store.get_balance(42), 100000)
+        self.assertIsNotNone(self.store.get_listing(auction))
+        mongo = object.__new__(db.MongoWebDB); mongo._market = Mock(); mongo._DESC = -1
+        mongo._market.find.return_value.sort.return_value.skip.return_value.limit.return_value = []
+        mongo.get_listings(search='Only', listing_type='fixed')
+        self.assertEqual(mongo._market.find.call_args.args[0]['listing_type'], {'$in': ['fixed', None]})
+        mongo.count_listings(listing_type='fixed')
+        self.assertEqual(mongo._market.count_documents.call_args.args[0]['listing_type'], {'$in': ['fixed', None]})
+
+    def test_games_live_below_home_actions_and_follow_owner_toggles(self):
+        self.store.set_wheel_show(True)
+        self.store.set_rocket_show(True)
+        self.store.set_card_update_show(True)
+        home = self.client.get('/').get_data(as_text=True)
+        self.assertLess(home.index('aria-label="Main actions"'), home.index('aria-label="More activities"'))
+        self.assertIn('id="openWheelBtn"', home)
+        self.assertIn('id="wheelModal"', home)
+        self.assertIn('js/wheel.js', home)
+        market = self.client.get('/market').get_data(as_text=True)
+        for marker in ('rocket-fab', 'card-update-fab', 'openWheelBtn', 'wheelModal', 'js/wheel.js'):
+            self.assertNotIn(marker, market)
+        self.store.set_wheel_show(False)
+        self.store.set_rocket_show(False)
+        self.store.set_card_update_show(False)
+        home = self.client.get('/').get_data(as_text=True)
+        self.assertNotIn('aria-label="More activities"', home)
+        self.assertNotIn('id="wheelModal"', home)
 
     def test_auction_queries_are_filtered_and_bounded(self):
         mongo = object.__new__(db.MongoWebDB); mongo._market = Mock(); mongo._tx=Mock();mongo._DESC=-1

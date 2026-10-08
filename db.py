@@ -212,8 +212,12 @@ class MongoWebDB:
         username = username.lstrip("@")
         return self._users.find_one({"username": {"$regex": f"^{re.escape(username)}$", "$options": "i"}})
 
-    def get_listings(self, skip=0, limit=20, rarity=None, search=None) -> list:
+    def get_listings(self, skip=0, limit=20, rarity=None, search=None, listing_type=None) -> list:
         filt: dict = {}
+        if listing_type == "fixed":
+            filt["listing_type"] = {"$in": ["fixed", None]}
+        elif listing_type:
+            filt["listing_type"] = listing_type
         if rarity:
             filt["char.rarity"] = rarity
         if search:
@@ -223,8 +227,12 @@ class MongoWebDB:
             ]
         return list(self._market.find(filt).sort("listed_at", self._DESC).skip(skip).limit(limit))
 
-    def count_listings(self, rarity=None, search=None) -> int:
+    def count_listings(self, rarity=None, search=None, listing_type=None) -> int:
         filt: dict = {}
+        if listing_type == "fixed":
+            filt["listing_type"] = {"$in": ["fixed", None]}
+        elif listing_type:
+            filt["listing_type"] = listing_type
         if rarity:
             filt["char.rarity"] = rarity
         if search:
@@ -268,7 +276,10 @@ class MongoWebDB:
             query["$or"] = [{"highest_bid.bidder_id": bidder_id}, {"bidder_ids": bidder_id}]
         return list(self._market.find(query).sort("ends_at", 1).skip(skip).limit(limit))
 
-    def get_auction_wins(self, user_id, skip=0, limit=24):
+    def get_auction_wins(self, user_id, skip=0, limit=10):
+        limit = min(limit, max(0, 10 - skip))
+        if limit <= 0:
+            return []
         return list(self._tx.find({"type": "auction_sale", "from_id": user_id})
                     .sort("ts", self._DESC).skip(skip).limit(limit))
 
@@ -303,6 +314,8 @@ class MongoWebDB:
             return {"ok": False, "error": "Invalid listing ID"}
         if not listing:
             return {"ok": False, "error": "Listing not found"}
+        if (listing.get("listing_type") or "fixed") != "fixed":
+            return {"ok": False, "error": "Use Auction to bid on this card"}
         if listing["seller_id"] == buyer_id:
             return {"ok": False, "error": "Cannot buy your own listing"}
         price = listing["price"]
@@ -377,6 +390,8 @@ class MongoWebDB:
         listing = self._market.find_one({"_id": oid})
         if not listing:
             return {"ok": False, "error": "Listing not found"}
+        if (listing.get("listing_type") or "fixed") != "fixed":
+            return {"ok": False, "error": "Use Auction to bid on this card"}
         if listing.get("seller_id") == buyer_id:
             return {"ok": False, "error": "Cannot lucky-buy your own listing"}
         price = int(listing.get("price", 0))
@@ -472,6 +487,13 @@ class MongoWebDB:
             "details": details or {},
             "ts":      time.time(),
         })
+        if tx_type == "auction_sale":
+            older = list(self._tx.find({"type": "auction_sale", "from_id": from_id}, {"_id": 1})
+                         .sort([("ts", -1), ("_id", -1)]).skip(10))
+            if older:
+                self._tx.delete_many({"type": "auction_sale", "from_id": from_id,
+                                      "_id": {"$in": [row["_id"] for row in older]}})
+
     def get_transactions(self, user_id: int, limit=10) -> list:
         return list(
             self._tx.find({"$or": [{"from_id": user_id}, {"to_id": user_id}]})
@@ -890,8 +912,10 @@ class LocalWebDB:
         items.sort(key=lambda x: x.get("listed_at", 0), reverse=True)
         return items
 
-    def get_listings(self, skip=0, limit=20, rarity=None, search=None) -> list:
+    def get_listings(self, skip=0, limit=20, rarity=None, search=None, listing_type=None) -> list:
         items = self._all_listings()
+        if listing_type:
+            items = [i for i in items if (i.get("listing_type") or "fixed") == listing_type]
         if rarity:
             items = [i for i in items if i.get("char", {}).get("rarity") == rarity]
         if search:
@@ -901,8 +925,8 @@ class LocalWebDB:
                      s in i.get("char", {}).get("anime", "").lower()]
         return items[skip:skip + limit]
 
-    def count_listings(self, rarity=None, search=None) -> int:
-        return len(self.get_listings(0, 999999, rarity, search))
+    def count_listings(self, rarity=None, search=None, listing_type=None) -> int:
+        return len(self.get_listings(0, 999999, rarity, search, listing_type))
 
     def get_listing(self, listing_id: str):
         return self._load("market").get(listing_id)
@@ -934,7 +958,10 @@ class LocalWebDB:
                       or bidder_id in item.get("bidder_ids", []))]
         return sorted(items, key=lambda item: item["ends_at"])[skip:skip + limit]
 
-    def get_auction_wins(self, user_id, skip=0, limit=24):
+    def get_auction_wins(self, user_id, skip=0, limit=10):
+        limit = min(limit, max(0, 10 - skip))
+        if limit <= 0:
+            return []
         items = [tx for tx in self._load("transactions").values()
                  if tx.get("type") == "auction_sale" and tx.get("from_id") == user_id]
         return sorted(items, key=lambda tx: tx.get("ts", 0), reverse=True)[skip:skip + limit]
@@ -970,6 +997,8 @@ class LocalWebDB:
         listing = self.get_listing(listing_id)
         if not listing:
             return {"ok": False, "error": "Listing not found"}
+        if (listing.get("listing_type") or "fixed") != "fixed":
+            return {"ok": False, "error": "Use Auction to bid on this card"}
         if listing["seller_id"] == buyer_id:
             return {"ok": False, "error": "Cannot buy your own listing"}
         price = listing["price"]
@@ -1042,6 +1071,8 @@ class LocalWebDB:
         listing = self.get_listing(listing_id)
         if not listing:
             return {"ok": False, "error": "Listing not found"}
+        if (listing.get("listing_type") or "fixed") != "fixed":
+            return {"ok": False, "error": "Use Auction to bid on this card"}
         if listing.get("seller_id") == buyer_id:
             return {"ok": False, "error": "Cannot lucky-buy your own listing"}
         price = int(listing.get("price", 0))
@@ -1139,6 +1170,12 @@ class LocalWebDB:
         tid = uuid.uuid4().hex
         txs[tid] = {"id": tid, "type": tx_type, "from_id": from_id, "to_id": to_id,
                     "amount": amount, "details": details or {}, "ts": time.time()}
+        if tx_type == "auction_sale":
+            wins = sorted((row for row in txs.values()
+                           if row.get("type") == "auction_sale" and row.get("from_id") == from_id),
+                          key=lambda row: row.get("ts", 0), reverse=True)
+            for row in wins[10:]:
+                txs.pop(row["id"], None)
         self._u("transactions", txs)
 
     def get_transactions(self, user_id: int, limit=10) -> list:

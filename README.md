@@ -110,8 +110,11 @@ For best hosted latency, place Vercel functions near the Atlas database. On larg
 
 ## Auction history
 
-Open **Auction → My bids** for current participation and leading/outbid status; **Won** retains your completed wins. At expiry, the displayed auction page refreshes once: ended bids leave My bids, and settled wins appear in Won. Up to 25 expired auctions settle per page visit, so a large backlog can take multiple visits.
+Open **Auction → My bids** for current participation and leading/outbid status; **Won** keeps your latest 10 completed wins. At expiry, the displayed auction page refreshes once: ended bids leave My bids, and settled wins appear in Won. Up to 25 expired auctions settle per page visit, so a large backlog can take multiple visits.
 
-Winning history uses existing `auction_sale` transaction records. Transactions are no longer automatically pruned after ten entries; Wallet still displays its latest ten. Already-deleted historical transactions cannot be recovered by this update. Participant tracking starts with bids placed after this update; legacy auctions still show the current highest bidder, but earlier outbid participants may have no stored record. Filtering losing bids from the UI does not delete users, balances or unrelated MongoDB records.
+Winning history uses existing `auction_sale` transaction records. When a new auction win is recorded, older `auction_sale` records beyond the winner’s latest ten are deleted. The deletion is restricted to that winner and those older records; other transaction types, users, owned cards and balances are untouched. Existing older wins are hidden immediately and pruned on the next win. Wallet displays its latest ten transactions. Already-deleted historical transactions cannot be recovered by this update. Participant tracking starts with bids placed after this update; legacy auctions still show the current highest bidder, but earlier outbid participants may have no stored record. Filtering losing bids from the UI does not delete users, balances or unrelated MongoDB records.
 
 Focused synthetic checks: `PYTHONPATH=. python scripts/test_loading_history.py`.
+
+
+Home shows the bot profile's stored level (`level`, `lvl`, `user_level`, existing experience-level aliases or nested `experience.level/lvl`), without allowing a session default to override it. If none is available, it shows “Level unavailable”; no XP formula is assumed. Rocket, Update and Wheel appear beneath Home's four main action buttons when their owner visibility switches are enabled. Wheel opens its existing spin modal there. Market lists only fixed-price cards (including legacy listings without a type); Auction lists only auctions. Direct Market purchase/Lucky Buy requests also reject auction cards.

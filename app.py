@@ -844,18 +844,19 @@ def index():
         stored = get_db().get_profile(int(user["id"])) or {}
         user.update({k: stored[k] for k in ("photo_url", "avatar", "level", "lvl", "user_level", "rank", "experience_level", "experienceLevel", "expLevel", "experience", "xp", "exp") if stored.get(k)})
         user["photo_url"] = user.get("photo_url") or user.get("avatar", "")
-        experience = user.get("experience")
-        if isinstance(experience, dict):
-            experience = experience.get("level") or experience.get("lvl") or experience.get("value")
-        explicit_level = user.get("experience_level") or user.get("experienceLevel") or user.get("expLevel") or user.get("level") or user.get("lvl") or user.get("user_level") or user.get("rank")
-        raw_exp = user.get("xp") or user.get("exp") or experience or 0
-        user["level"] = max(1, _nonnegative_int(explicit_level, _nonnegative_int(raw_exp) // 100 + 1))
+        # Read the stored profile before session defaults (which contain level=1).
+        # The bot owns progression; do not invent a level from an unknown XP formula.
+        experience = stored.get("experience")
+        nested = experience if isinstance(experience, dict) else {}
+        candidates = [stored.get(key) for key in
+                      ("experience_level", "experienceLevel", "expLevel", "level", "lvl", "user_level", "rank")]
+        candidates.extend(nested.get(key) for key in ("level", "lvl"))
+        user["level"] = next((value for raw in candidates
+                              if (value := _nonnegative_int(raw)) > 0), None)
     balance_str = usd(stored.get("coins", 0)) if user else "0.00"
-    xp = _nonnegative_int(user.get("xp", 0)) if user else 0
-    level_progress = min(100, max(0, xp % 1000) / 10)
     return render_template(
         "index.html", bot_username=_bot_username(), user=user,
-        balance_str=balance_str, level_progress=level_progress,
+        balance_str=balance_str,
         welcome_slides=[url_for("welcome_media", index=i, v=slide.get("version")) for i, slide in enumerate(display_state(get_db())["slides"])],
         is_owner=is_owner(),
     )
@@ -868,11 +869,11 @@ def market():
     per_page = 20
     rarity   = request.args.get("rarity", "").strip() or None
     search   = request.args.get("q",      "").strip()[:100] or None
-    total    = db.count_listings(rarity, search)
+    total    = db.count_listings(rarity, search, listing_type="fixed")
     pages    = max(1, (total + per_page - 1) // per_page)
     page     = min(page, pages)
     skip     = (page - 1) * per_page
-    listings = [_fmt_listing(l) for l in db.get_listings(skip, per_page, rarity, search)]
+    listings = [_fmt_listing(l) for l in db.get_listings(skip, per_page, rarity, search, listing_type="fixed")]
     rarities = list(RARITY_VALUE.keys())
     return render_template(
         "market.html",

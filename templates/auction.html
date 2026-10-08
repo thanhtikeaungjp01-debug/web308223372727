@@ -19,7 +19,7 @@
 <section class="card auction-prices"><strong>Starting price (half of card reference price)</strong><div class="auction-price-grid">{% for rarity, cents in auction_floors.items() %}<span>{{ rarity }} <b>{{ "%.2f"|format(cents / 100) }}$</b></span>{% endfor %}</div></section>
 {% endif %}
 {% if tab == 'wins' %}
-<p class="page-subtitle auction-history-note">Your winning cards stay here. Ended bids you did not win leave My bids automatically.</p>
+<p class="page-subtitle auction-history-note">Your latest 10 wins stay here. Older wins are removed when you win again. Ended bids you did not win leave My bids automatically.</p>
 {% if wins %}<div class="card-grid auction-grid">
 {% for win in wins %}
 <article class="char-card auction-card">

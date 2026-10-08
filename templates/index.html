@@ -28,8 +28,7 @@
     <a class="mini-balance" href="{{ url_for('wallet') }}" aria-label="{{ 'Wallet balance ' ~ balance_str if user else 'Sign in to view wallet' }}"><span class="mini-balance-copy"><small>BALANCE</small><strong>{{ balance_str if user else '—' }}</strong></span><span class="mini-coin" aria-hidden="true">💸</span></a>
   </section>
   <section class="mini-level" aria-label="Collector level">
-    <div class="mini-level-label"><span>LVL <strong>{{ user.level if user else '—' }}</strong></span><small>{{ (level_progress|int) ~ '% to next level' if user else 'A new adventure awaits' }}</small></div>
-    <div class="mini-level-track" role="progressbar" aria-label="Progress to next level" aria-valuenow="{{ level_progress|int if user else 0 }}" aria-valuemin="0" aria-valuemax="100"><span style="width:{{ level_progress if user else 0 }}%"></span></div>
+    <div class="mini-level-label"><span>LVL <strong>{{ user.level if user and user.level else '—' }}</strong></span><small>{{ 'Collector level' if user and user.level else ('Level unavailable' if user else 'A new adventure awaits') }}</small></div>
   </section>
 
   <section class="mini-welcome" aria-label="Welcome to your waifu universe">
@@ -53,7 +52,14 @@
     {% endfor %}
   </nav>
 
-  {% if rocket_show or card_update_show %}<nav class="mini-extras" aria-label="More activities">{% if rocket_show %}<a href="{{ url_for('rocket') }}">{{ icon('rocket') }} Rocket {{ icon('arrow') }}</a>{% endif %}{% if card_update_show %}<a href="{{ url_for('card_update_page') }}">{{ icon('star') }} Card upgrade {{ icon('arrow') }}</a>{% endif %}</nav>{% endif %}
+  {% if rocket_show or card_update_show or wheel_show %}
+  <nav class="mini-extras" aria-label="More activities">
+    {% if rocket_show %}<a href="{{ url_for('rocket') }}">{{ icon('rocket') }}<span>Rocket</span>{{ icon('arrow') }}</a>{% endif %}
+    {% if card_update_show %}<a href="{{ url_for('card_update_page') }}">{{ icon('star') }}<span>Update</span>{{ icon('arrow') }}</a>{% endif %}
+    {% if wheel_show %}<button id="openWheelBtn" type="button">{{ icon('wheel') }}<span>Wheel</span>{{ icon('arrow') }}</button>{% endif %}
+  </nav>
+  {% endif %}
+  {% if wheel_show %}{% include 'partials/wheel_modal.html' %}{% endif %}
 
   <p class="mini-owner">Guess Bot Owner - <a href="https://t.me/osamu1123" target="_blank" rel="noopener noreferrer">@osamu1123</a></p>
   {% if not user %}
@@ -67,4 +73,4 @@
   {% for endpoint,title,symbol in [('index','Home','home'),('market','Market','market'),('harem','Harem','harem'),('wallet','Wallet','wallet')] %}<a href="{{ url_for(endpoint) }}"{% if endpoint == 'index' %} aria-current="page"{% endif %}>{{ icon(symbol) }}<span>{{ title }}</span></a>{% endfor %}
 </nav>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='js/mini-home.js') }}"></script>{% endblock %}
+{% block scripts %}{% if wheel_show %}<script src="{{ url_for('static', filename='js/wheel.js') }}"></script>{% endif %}<script src="{{ url_for('static', filename='js/mini-home.js') }}"></script>{% endblock %}
