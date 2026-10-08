@@ -1673,7 +1673,6 @@ body { background: radial-gradient(ellipse at 80% 8%,rgba(94,57,144,.12),transpa
 .nav-toggle { min-width: 42px; min-height: 42px; }
 .main-content { max-width: 1176px; padding: 42px 28px 56px; }
 .mobile-menu-inner { max-width: 1120px; }
-.logout-button { width: 100%; cursor: pointer; font-family: inherit; background: transparent; border: 0; text-align: left; }
 .footer { margin-top: 20px; padding: 26px; color: var(--text2); }
 .filter-bar { padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg2); }
 .search-input, .rarity-select, .form-input { min-height: 44px; }
