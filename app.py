@@ -14,7 +14,7 @@ import random
 import secrets
 import tempfile
 import urllib.parse
-from PIL import Image
+from PIL import Image, ImageOps
 from functools import lru_cache
 from threading import Lock
 from werkzeug.exceptions import HTTPException
@@ -22,7 +22,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 import requests as _req
 from flask import (Flask, render_template, request, session, redirect,
-                   url_for, jsonify, send_file, abort)
+                   url_for, jsonify, send_file, abort, g)
 
 try:
     from web.db          import get_db, reset_db, usd, is_sellable, RARITY_VALUE, DAILY_RARITY_KEYS, DAILY_RARITY_UNLIMITED, _ago, LIST_FEE
@@ -46,6 +46,11 @@ if IS_VERCEL:
     if not valid_user_id(os.environ["OWNER_ID"]):
         raise RuntimeError("OWNER_ID must be a positive Telegram user ID.")
 
+try:
+    from web.display_cache import display_state
+except ModuleNotFoundError:
+    from display_cache import display_state
+
 app = Flask(__name__, template_folder="templates", static_folder="static")
 if IS_VERCEL or os.environ.get("TRUST_PROXY") == "1":
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
@@ -56,6 +61,7 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 3600
 app.secret_key = os.environ.get("SESSION_SECRET", os.urandom(32))
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
+    SESSION_REFRESH_EACH_REQUEST=False,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=IS_VERCEL or os.environ.get("SESSION_COOKIE_SECURE", "0") == "1",
     MAX_CONTENT_LENGTH=(4 * 1024 * 1024 + 64 * 1024) if IS_VERCEL else 32 * 1024 * 1024,
@@ -129,12 +135,19 @@ AUCTION_MIN_PRICE = {
 }
 
 
+@lru_cache(maxsize=128)
+def _asset_version(path, modified, size):
+    with open(path, "rb") as asset:
+        return hashlib.sha256(asset.read()).hexdigest()[:16]
+
+
 @app.url_defaults
 def version_static_assets(endpoint, values):
     if endpoint == "static" and "filename" in values:
         path = os.path.join(app.static_folder, values["filename"])
         try:
-            values.setdefault("v", str(os.stat(path).st_mtime_ns))
+            stat = os.stat(path)
+            values.setdefault("v", _asset_version(path, stat.st_mtime_ns, stat.st_size))
         except OSError:
             pass
 
@@ -235,11 +248,13 @@ _tg_file_info_cache: dict[str, dict] = {}
 
 def _tg_file_info(file_id: str) -> dict | None:
     """Resolve a Telegram file_id once and keep the result in process memory."""
-    if file_id in _tg_file_info_cache:
-        return _tg_file_info_cache[file_id]
     token = _bot_token()
     if not token:
         return None
+    key = (hashlib.sha256(token.encode()).hexdigest(), file_id)
+    cached = _tg_file_info_cache.get(key)
+    if cached and cached["expires_at"] > time.monotonic():
+        return cached
     try:
         r = _req.get(
             f"https://api.telegram.org/bot{token}/getFile",
@@ -251,8 +266,11 @@ def _tg_file_info(file_id: str) -> dict | None:
             info = {
                 "url": f"https://api.telegram.org/file/bot{token}/{result['file_path']}",
                 "path": result.get("file_path", ""),
+                "expires_at": time.monotonic() + 3000,
             }
-            _tg_file_info_cache[file_id] = info
+            if len(_tg_file_info_cache) >= 512:
+                _tg_file_info_cache.pop(next(iter(_tg_file_info_cache)))
+            _tg_file_info_cache[key] = info
             return info
     except Exception:
         pass
@@ -300,7 +318,7 @@ def media_url(value, fallback: str | None = None, hint: str = "") -> str | None:
     ref = _media_ref(value)
     if not ref:
         return fallback
-    return url_for("media_proxy", token=_media_token(ref))
+    return url_for("media_proxy", token=_media_token(ref), **({"w": 640} if _media_kind(ref, hint) == "image" else {}))
 
 
 def char_img_url(img_url: str) -> str:
@@ -333,7 +351,7 @@ def _format_char_media(char: dict) -> dict:
         )
         return {
             "char_img": media_url(poster_ref, None) if poster_ref and poster_ref != video_ref else "",
-            "char_video": media_url(video_ref, None),
+            "char_video": media_url(video_ref, None, hint="video"),
         }
     return {
         "char_img": media_url(image_ref, url_for("static", filename="img/card-placeholder.svg")),
@@ -368,16 +386,16 @@ def inject_site_logo():
         "card_update_show": False,
     }
     try:
-        logo = get_db().get_logo(include_data=False)
+        state = display_state(get_db())
+        logo = state["logo"]
         if logo:
-            context["site_logo_url"] = url_for("site_logo")
-        ad_banner = get_db().get_ad_banner(include_data=False)
+            context["site_logo_url"] = url_for("site_logo", v=logo.get("version"))
+        ad_banner = state["ad"]
         if ad_banner:
-            context["ad_banner_url"] = url_for("ad_banner_media")
+            context["ad_banner_url"] = url_for("ad_banner_media", v=ad_banner.get("version"))
             context["ad_banner_is_video"] = str(ad_banner.get("mime", "")).lower().startswith("video/")
             context["config"]["AD_BANNER_URL"] = context["ad_banner_url"]
-        context["rocket_show"] = bool(get_db().get_rocket_show())
-        context["card_update_show"] = bool(get_db().get_card_update_show())
+        context.update({key: state[key] for key in ("rocket_show", "card_update_show", "wheel_show")})
     except Exception:
         pass
     return context
@@ -446,7 +464,7 @@ def security_headers(response):
 @app.before_request
 def _check_setup():
     exempt = {"setup", "static", "maintenance", "healthz", "bot_status",
-              "proxy_image", "media_proxy", "site_logo", "capacity_status",
+              "proxy_image", "media_proxy", "site_logo", "welcome_media", "ad_banner_media", "capacity_status",
               "capacity_release", "bot_auth", "telegram_auth", "webapp_auth",
               "logout", "index", "verify_gate"}
     if request.endpoint is None or request.endpoint in exempt:
@@ -494,7 +512,8 @@ _NO_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "static", "img", "card-
 
 def _serve_no_image():
     resp = send_file(_NO_IMAGE_PATH, mimetype="image/svg+xml")
-    resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Cache-Control"] = "no-store"
+    resp.headers["Vercel-CDN-Cache-Control"] = "no-store"
     return resp
 
 
@@ -541,64 +560,101 @@ def _trim_media_cache(incoming_bytes: int = 0, exclude: str = "") -> None:
         total -= size
 
 
-def _serve_cached_media(ref: str):
-    """Fetch bot/external media once to disk, then serve it with browser caching."""
-    ref = _media_ref(ref)
-    cache_key = hashlib.sha256(ref.encode("utf-8")).hexdigest()
-    cache_file = os.path.join(_MEDIA_CACHE_DIR, cache_key)
-    meta_file  = cache_file + ".ct"
+_MEDIA_LOCKS = [Lock() for _ in range(32)]
 
+
+def _media_response(path, content_type, stable):
+    response = send_file(path, mimetype=content_type, conditional=True)
+    response.headers["Cache-Control"] = ("public, max-age=2592000, immutable" if stable
+                                         else "public, max-age=300, stale-while-revalidate=60")
+    response.headers["Vercel-CDN-Cache-Control"] = "public, s-maxage=" + ("2592000" if stable else "300")
+    return response
+
+
+def _serve_cached_media(ref: str):
+    """Bounded per-instance disk cache, plus browser/CDN caching across visits."""
+    ref = _media_ref(ref)
+    thumbnail = request.args.get("w") == "640"
+    key = hashlib.sha256((ref + ("|thumb640-v1" if thumbnail else "")).encode()).hexdigest()
+    with _MEDIA_LOCKS[int(key[:2], 16) % len(_MEDIA_LOCKS)]:
+        return _fetch_cached_media(ref, key, thumbnail)
+
+
+def _fetch_cached_media(ref, key, thumbnail):
+    stable = not ref.startswith(("http://", "https://"))
+    cache_file = os.path.join(_MEDIA_CACHE_DIR, key)
+    meta_file = cache_file + ".ct"
     if os.path.exists(cache_file) and os.path.exists(meta_file):
         try:
+            # External image URLs may be edited in place; refresh them after 5m.
+            if not stable and time.time() - os.path.getmtime(cache_file) > 300:
+                raise ValueError("external media expired")
             with open(meta_file) as metadata:
-                ct = metadata.read().strip()
-            os.utime(cache_file, None)  # atime is the LRU signal
-            resp = send_file(cache_file, mimetype=ct, conditional=True, max_age=604800)
-            resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
-            return resp
-        except Exception:
-            pass
+                content_type = metadata.read().strip()
+            stat = os.stat(cache_file)
+            os.utime(cache_file, (time.time(), stat.st_mtime))
+            return _media_response(cache_file, content_type, stable)
+        except (OSError, ValueError):
+            _remove_media_cache_entry(cache_file)
 
-    info = _tg_file_info(ref) if not ref.startswith(("http://", "https://")) else None
-    url = ref if ref.startswith(("http://", "https://")) else (info or {}).get("url")
+    info = _tg_file_info(ref) if stable else None
+    url = (info or {}).get("url") if stable else ref
     if not url:
         return _serve_no_image()
-    temp_file = f"{cache_file}.tmp.{secrets.token_hex(12)}"
-    r = None
+    temporary = f"{cache_file}.tmp.{secrets.token_hex(12)}"
+    response = None
     try:
-        r = _req.get(url, stream=True, timeout=(6, 30))
-        if r.status_code != 200:
+        response = _req.get(url, stream=True, timeout=(6, 20))
+        if response.status_code != 200:
             return _serve_no_image()
-        ct = r.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-        if not ct:
-            ct = "video/mp4" if _media_kind(ref, (info or {}).get("path", "")) == "video" else "image/jpeg"
+        content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        if not content_type:
+            content_type = "video/mp4" if _media_kind(ref, (info or {}).get("path", "")) == "video" else "image/jpeg"
+        image_variant = thumbnail and content_type.startswith("image/")
+        download_limit = 12 * 1024 * 1024 if IS_VERCEL and image_variant else _MAX_MEDIA_BYTES
         total = 0
-        with open(temp_file, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 1024):
+        with open(temporary, "wb") as output:
+            for chunk in response.iter_content(chunk_size=64 * 1024):
                 if not chunk:
                     continue
                 total += len(chunk)
-                if total > _MAX_MEDIA_BYTES:
-                    raise ValueError("media file is larger than the cache limit")
-                f.write(chunk)
-        _remove_media_cache_entry(cache_file)
+                if total > download_limit:
+                    raise ValueError("media download limit exceeded")
+                output.write(chunk)
+        if image_variant:
+            try:
+                with Image.open(temporary) as original:
+                    if original.width * original.height > 25_000_000:
+                        raise ValueError("image dimensions too large")
+                    # Preserve animated GIF/WebP media instead of freezing frame 1.
+                    if not getattr(original, "is_animated", False):
+                        picture = ImageOps.exif_transpose(original)
+                        picture.thumbnail((640, 640), Image.Resampling.LANCZOS)
+                        converted = io.BytesIO()
+                        picture.convert("RGBA" if "A" in picture.getbands() else "RGB").save(converted, format="WEBP", quality=82)
+                        optimized = converted.getvalue()
+                        with open(temporary, "wb") as output:
+                            output.write(optimized)
+                        total = len(optimized)
+                        content_type = "image/webp"
+            except (OSError, Image.DecompressionBombError) as error:
+                raise ValueError("invalid thumbnail image") from error
+        if total > _MAX_MEDIA_BYTES:
+            raise ValueError("media response limit exceeded")
         _trim_media_cache(incoming_bytes=total, exclude=cache_file)
-        os.replace(temp_file, cache_file)
-        with open(meta_file, "w") as f:
-            f.write(ct)
-        resp = send_file(cache_file, mimetype=ct, conditional=True, max_age=604800)
-        resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
-        return resp
-    except Exception:
-        try:
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-        except OSError:
-            pass
+        os.replace(temporary, cache_file)
+        with open(meta_file, "w") as metadata:
+            metadata.write(content_type)
+        return _media_response(cache_file, content_type, stable)
+    except (OSError, ValueError, _req.RequestException):
         return _serve_no_image()
     finally:
-        if r is not None:
-            r.close()
+        if response is not None:
+            response.close()
+        try:
+            os.remove(temporary)
+        except FileNotFoundError:
+            pass
 
 
 @app.route("/media/<token>")
@@ -785,7 +841,7 @@ def index():
         session["login_next"] = _safe_next_url(request.args.get("next"), "/")
     user = current_user()
     if user:
-        stored = get_db().get_user(int(user["id"])) or {}
+        stored = get_db().get_profile(int(user["id"])) or {}
         user.update({k: stored[k] for k in ("photo_url", "avatar", "level", "lvl", "user_level", "rank", "experience_level", "experienceLevel", "expLevel", "experience", "xp", "exp") if stored.get(k)})
         user["photo_url"] = user.get("photo_url") or user.get("avatar", "")
         experience = user.get("experience")
@@ -794,13 +850,13 @@ def index():
         explicit_level = user.get("experience_level") or user.get("experienceLevel") or user.get("expLevel") or user.get("level") or user.get("lvl") or user.get("user_level") or user.get("rank")
         raw_exp = user.get("xp") or user.get("exp") or experience or 0
         user["level"] = max(1, _nonnegative_int(explicit_level, _nonnegative_int(raw_exp) // 100 + 1))
-    balance_str = usd(get_db().get_balance(int(user["id"]))) if user else "0.00"
+    balance_str = usd(stored.get("coins", 0)) if user else "0.00"
     xp = _nonnegative_int(user.get("xp", 0)) if user else 0
     level_progress = min(100, max(0, xp % 1000) / 10)
     return render_template(
         "index.html", bot_username=_bot_username(), user=user,
         balance_str=balance_str, level_progress=level_progress,
-        welcome_slides=[url_for("welcome_media", index=i) for i, _ in enumerate(get_db().get_welcome_slides(include_data=False))],
+        welcome_slides=[url_for("welcome_media", index=i, v=slide.get("version")) for i, slide in enumerate(display_state(get_db())["slides"])],
         is_owner=is_owner(),
     )
 
@@ -824,25 +880,40 @@ def market():
         page=page, pages=pages, total=total,
         rarity=rarity or "", search=search or "",
         rarities=rarities, is_owner=is_owner(),
-        wheel_show=db.get_wheel_show(),
-        rocket_show=db.get_rocket_show(),
-        card_update_show=db.get_card_update_show(),
-        welcome_slides=[url_for("welcome_media", index=i) for i, _ in enumerate(db.get_welcome_slides(include_data=False))],
+        welcome_slides=[url_for("welcome_media", index=i, v=slide.get("version")) for i, slide in enumerate(display_state(db)["slides"])],
     )
 
 def _settle_expired_auctions(db):
-    now = time.time()
-    for listing in db.get_listings(0, 100000):
-        if listing.get("listing_type") == "auction" and listing.get("ends_at") and float(listing["ends_at"]) <= now:
-            db.close_auction(str(listing.get("_id", "")), listing.get("seller_id"), by_admin=True)
+    # Bound settlement work per visit; never scan the entire marketplace.
+    for listing in db.get_auctions(time.time(), limit=25, expired=True):
+        db.close_auction(str(listing.get("_id", "")), listing.get("seller_id"), by_admin=True)
 
 @app.route("/auction")
 @login_required
 def auction():
     db = get_db()
     _settle_expired_auctions(db)
-    auctions = [l for l in db.get_listings(0, 100000) if l.get("listing_type") == "auction"]
-    return render_template("auction.html", user=current_user(), auctions=[_fmt_listing(l) for l in auctions], auction_floors=AUCTION_MIN_PRICE, is_owner=is_owner())
+    tab = request.args.get("tab", "active")
+    if tab not in {"active", "bids", "wins"}:
+        tab = "active"
+    page = max(1, min(request.args.get("page", 1, type=int), 1000))
+    per_page = 24
+    uid = session["user_id"]
+    rows = (db.get_auction_wins(uid, (page - 1) * per_page, per_page + 1) if tab == "wins" else
+            db.get_auctions(time.time(), (page - 1) * per_page, per_page + 1,
+                            bidder_id=uid if tab == "bids" else None))
+    has_next = len(rows) > per_page
+    rows = rows[:per_page]
+    wins = []
+    if tab == "wins":
+        for row in rows:
+            char = row.get("details", {}).get("char") or {}
+            wins.append({"char": char, "price_str": usd(row.get("amount", 0)),
+                         "ago": _ago(row.get("ts", 0)), **_format_char_media(char)})
+    return render_template("auction.html", user=current_user(),
+                           auctions=[] if tab == "wins" else [_fmt_listing(row) for row in rows],
+                           wins=wins, tab=tab, page=page, has_next=has_next,
+                           auction_floors=AUCTION_MIN_PRICE, is_owner=is_owner())
 
 
 @app.route("/card-update")
@@ -883,6 +954,11 @@ def wallet():
     uid = session["user_id"]
     bal = db.get_balance(uid)
     txs = db.get_transactions(uid, 10)
+    names = db.get_user_names({party for tx in txs for party in (tx.get("from_id"), tx.get("to_id")) if party})
+    def party_name(party):
+        doc = names.get(party) or {}
+        first, username = doc.get("first_name", ""), doc.get("username", "")
+        return f"{first} (@{username})" if first and username and first != username else (first or username or str(party or ""))
     for tx in txs:
         tx["_id_str"]    = str(tx.get("_id", tx.get("id", "")))
         tx["ago"]        = _ago(tx.get("ts", 0))
@@ -903,9 +979,9 @@ def wallet():
         from_id   = tx.get("from_id")
         to_id     = tx.get("to_id")
         from_name = (det.get("from_name") or det.get("buyer_name")  or
-                     _resolve_user_name(db, from_id) if from_id else "")
+                     party_name(from_id) if from_id else "")
         to_name   = (det.get("to_name")   or det.get("seller_name") or
-                     _resolve_user_name(db, to_id)   if to_id   else "")
+                     party_name(to_id)   if to_id   else "")
         if tx["direction"] == "out":
             tx["party_label"] = "To";   tx["party_name"] = to_name;   tx["party_id"] = to_id
         else:
@@ -990,6 +1066,16 @@ def api_view(listing_id):
     except Exception:
         pass
     return jsonify({"ok": True})
+
+
+@app.route("/api/views", methods=["POST"])
+def api_views():
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    if not isinstance(ids, list) or len(ids) > 40 or any(not isinstance(value, str) or not 1 <= len(value) <= 64 for value in ids):
+        return jsonify(ok=False, error="Invalid listing IDs"), 400
+    if ids:
+        get_db().increment_listing_views_many(ids)
+    return jsonify(ok=True)
 
 
 # ── API: save settings (admin) ────────────────────────────────────────────────
@@ -1242,16 +1328,27 @@ MAX_LOGO_UPLOAD_BYTES = (4 if IS_VERCEL else 5) * 1024 * 1024
 MAX_WELCOME_UPLOAD_BYTES = (4 if IS_VERCEL else 8) * 1024 * 1024
 MAX_WELCOME_STORED_BYTES = 180 * 1024
 
+def _stored_media_response(item):
+    fingerprint = hashlib.sha256(item["data"].encode()).hexdigest()
+    version = request.args.get("v")
+    if version and version != fingerprint:
+        abort(404)
+    data = base64.b64decode(item["data"])
+    if IS_VERCEL and len(data) > _MAX_MEDIA_BYTES:
+        return _serve_no_image()
+    response = send_file(io.BytesIO(data), mimetype=item.get("mime", "image/webp"),
+                         etag=hashlib.sha256(data).hexdigest(), conditional=True)
+    response.headers["Cache-Control"] = "public, max-age=2592000, immutable" if version else "public, no-cache"
+    response.headers["Vercel-CDN-Cache-Control"] = "public, s-maxage=2592000" if version else "no-store"
+    return response
+
+
 @app.route("/site-logo")
 def site_logo():
     try:
         logo = get_db().get_logo()
         if logo:
-            data = base64.b64decode(logo["data"])
-            resp = send_file(io.BytesIO(data), mimetype=logo["mime"],
-                             etag=hashlib.sha256(data).hexdigest())
-            resp.headers["Cache-Control"] = "public, no-cache"
-            return resp
+            return _stored_media_response(logo)
     except Exception:
         pass
     abort(404)
@@ -1292,11 +1389,8 @@ def admin_logo_delete():
 @app.route("/welcome-media/<int:index>")
 def welcome_media(index):
     try:
-        slide = get_db().get_welcome_slides()[index]
-        resp = send_file(io.BytesIO(base64.b64decode(slide["data"])),
-                         mimetype=slide.get("mime", "image/jpeg"))
-        resp.headers["Cache-Control"] = "public, max-age=3600"
-        return resp
+        slide = get_db().get_welcome_slide(index)
+        return _stored_media_response(slide)
     except (IndexError, KeyError, ValueError, TypeError):
         abort(404)
 
@@ -1345,12 +1439,7 @@ def ad_banner_media():
     try:
         ad = get_db().get_ad_banner()
         if ad:
-            data = base64.b64decode(ad["data"])
-            if IS_VERCEL and len(data) > _MAX_MEDIA_BYTES:
-                return _serve_no_image()
-            resp = send_file(io.BytesIO(data), mimetype=ad["mime"])
-            resp.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=60"
-            return resp
+            return _stored_media_response(ad)
     except Exception:
         pass
     abort(404)

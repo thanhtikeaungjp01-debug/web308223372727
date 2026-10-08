@@ -129,7 +129,7 @@
 <section class="section">
   <h2 class="section-title">📣 Market Mini Banner Ad</h2>
   <p style="color:var(--text3);font-size:.85rem;margin-bottom:18px;">
-    Image သို့မဟုတ် video URL ထည့်ပါ။ Market ထဲဝင်တဲ့အခါ ညာဘက်အောက်ထောင့်မှာ mini banner အနေနဲ့ ပေါ်လာပြီး `×` နဲ့ ဖျောက်နိုင်ပါမယ်။ Banner ကိုနှိပ်ရင် အောက်က link သို့ သွားပါမယ်။
+    Image သို့မဟုတ် video URL ထည့်ပါ။ Market ထဲမှာ featured banner အနေနဲ့ ပေါ်လာပြီး × နဲ့ ဖျောက်နိုင်ပါမယ်။ Video ကို နှိပ်မှ play လုပ်ပါမယ်။ View offer က အောက်က link ကို ဖွင့်ပေးပါမယ်။
   </p>
   <div class="ad-upload-row" style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:18px;padding:12px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;">
     <div class="form-group" style="margin-bottom:0;flex:1;min-width:220px;">
@@ -528,7 +528,7 @@ document.getElementById('uploadAdBannerBtn')?.addEventListener('click', async ()
 });
 
 document.getElementById('deleteAdBannerBtn')?.addEventListener('click', async () => {
-  if (!confirm('Remove the popup ad?')) return;
+  if (!confirm('Remove the featured ad?')) return;
   const btn = document.getElementById('deleteAdBannerBtn');
   btn.disabled = true; btn.textContent = '…';
   const res = await apiPost('/admin/ad-banner/delete');

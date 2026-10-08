@@ -39,6 +39,8 @@
 </script>
 {% endif %}
 
+{% include "partials/ad_banner.html" %}
+
 <!-- Search & filter bar -->
 <form method="GET" action="{{ url_for('market') }}" class="filter-bar" id="filterForm">
   <div class="search-wrap">
@@ -80,7 +82,7 @@
            alt="{{ lst.char.name }}"
            class="char-img"
            decoding="async"
-           {% if loop.index > 6 %}loading="lazy"{% else %}fetchpriority="high"{% endif %}
+           {% if loop.index > 2 %}loading="lazy"{% else %}loading="eager" fetchpriority="high"{% endif %}
            onerror="this.onerror=null;this.src='/static/img/card-placeholder.svg';this.classList.add('img-ready');this.closest('.char-img-wrap')?.classList.add('loaded');">
       {% endif %}
       <div class="rarity-badge rarity-{{ lst.char.rarity | replace(' ','_') | replace('️','') }}">
@@ -287,28 +289,25 @@
 
 {% block scripts %}
 <script>
-/* ── View tracking via IntersectionObserver ── */
-(function(){
-  const seen = new Set();
-  const obs  = new IntersectionObserver(entries => {
-    entries.forEach(e => {
-      if (!e.isIntersecting) return;
-      const card = e.target;
-      const lid  = card.dataset.lid;
-      if (lid && !seen.has(lid)) {
-        seen.add(lid);
-        obs.unobserve(card);
-        fetch(`/api/view/${lid}`, {method:'POST'}).catch(()=>{});
-        // update badge live
-        const badge = card.querySelector('.view-badge');
-        if (badge) {
-          const cur = parseInt(badge.textContent.replace(/\D/g,'')) || 0;
-          badge.textContent = `👁 ${cur + 1}`;
-        }
-      }
+/* Send one small batch for visible cards instead of a request per image. */
+(() => {
+  if (!('IntersectionObserver' in window)) return;
+  const pending = new Set();
+  let timer;
+  const flush = async () => {
+    const ids = [...pending].slice(0, 40);
+    ids.forEach(id => pending.delete(id));
+    if (ids.length) await apiPost('/api/views', { ids });
+  };
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      observer.unobserve(entry.target);
+      pending.add(entry.target.dataset.lid);
     });
-  }, {threshold: 0.4});
-  document.querySelectorAll('.char-card[data-lid]').forEach(c => obs.observe(c));
+    if (pending.size) { clearTimeout(timer); timer = setTimeout(flush, 250); }
+  }, { threshold: 0.4 });
+  document.querySelectorAll('.char-card[data-lid]').forEach(card => observer.observe(card));
 })();
 
 document.querySelectorAll('.bid-btn').forEach(btn => btn.addEventListener('click', async () => {
