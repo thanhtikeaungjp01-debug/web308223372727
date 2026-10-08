@@ -27,10 +27,6 @@
     </div>
     <a class="mini-balance" href="{{ url_for('wallet') }}" aria-label="{{ 'Wallet balance ' ~ balance_str if user else 'Sign in to view wallet' }}"><span class="mini-balance-copy"><small>BALANCE</small><strong>{{ balance_str if user else '—' }}</strong></span><span class="mini-coin" aria-hidden="true">💸</span></a>
   </section>
-  <section class="mini-level" aria-label="Collector level">
-    <div class="mini-level-label"><span>LVL <strong>{{ user.level if user and user.level else '—' }}</strong></span><small>{{ 'Collector level' if user and user.level else ('Level unavailable' if user else 'A new adventure awaits') }}</small></div>
-  </section>
-
   <section class="mini-welcome" aria-label="Welcome to your waifu universe">
     <div class="mini-banner-track" id="miniBannerTrack">
       {% set slides = welcome_slides or [url_for('static', filename='img/waifu-welcome.webp')] %}

@@ -117,4 +117,4 @@ Winning history uses existing `auction_sale` transaction records. When a new auc
 Focused synthetic checks: `PYTHONPATH=. python scripts/test_loading_history.py`.
 
 
-Home shows the bot profile's stored level (`level`, `lvl`, `user_level`, existing experience-level aliases or nested `experience.level/lvl`), without allowing a session default to override it. If none is available, it shows “Level unavailable”; no XP formula is assumed. Rocket, Update and Wheel appear beneath Home's four main action buttons when their owner visibility switches are enabled. Wheel opens its existing spin modal there. Market lists only fixed-price cards (including legacy listings without a type); Auction lists only auctions. Direct Market purchase/Lucky Buy requests also reject auction cards.
+Rocket, Update and Wheel appear beneath Home's four main action buttons when their owner visibility switches are enabled. Wheel opens its existing spin modal there. Market lists only fixed-price cards (including legacy listings without a type); Auction lists only auctions. Direct Market purchase/Lucky Buy requests also reject auction cards.

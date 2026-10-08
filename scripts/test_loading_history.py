@@ -167,16 +167,6 @@ class LoadingHistoryTests(unittest.TestCase):
         mongo._tx.find.assert_not_called()
         mongo._tx.delete_many.assert_not_called()
 
-    def test_profile_level_uses_database_not_session_default(self):
-        user = self.store._load('users')['42']
-        for data in ({'lvl': 2345}, {'user_level': '2345'}, {'experience': {'level': 2345}},
-                     {'level': 'Collector', 'lvl': 2345}, {'level': 2345}):
-            for key in ('level', 'lvl', 'user_level', 'experience'): user.pop(key, None)
-            user.update(data)
-            self.assertIn(b'<strong>2345</strong>', self.client.get('/').data)
-        for key in ('level', 'lvl', 'user_level', 'experience'): user.pop(key, None)
-        self.assertIn(b'Level unavailable', self.client.get('/').data)
-
     def test_market_and_auction_are_separate_including_purchase_endpoints(self):
         fixed = self.store.add_listing(43, 'Seller', {'id': 21, 'name': 'Fixed Only'}, 100)
         legacy = self.store.add_listing(43, 'Seller', {'id': 22, 'name': 'Legacy Fixed'}, 100)

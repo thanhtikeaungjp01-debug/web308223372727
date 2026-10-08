@@ -842,17 +842,8 @@ def index():
     user = current_user()
     if user:
         stored = get_db().get_profile(int(user["id"])) or {}
-        user.update({k: stored[k] for k in ("photo_url", "avatar", "level", "lvl", "user_level", "rank", "experience_level", "experienceLevel", "expLevel", "experience", "xp", "exp") if stored.get(k)})
+        user.update({k: stored[k] for k in ("photo_url", "avatar") if stored.get(k)})
         user["photo_url"] = user.get("photo_url") or user.get("avatar", "")
-        # Read the stored profile before session defaults (which contain level=1).
-        # The bot owns progression; do not invent a level from an unknown XP formula.
-        experience = stored.get("experience")
-        nested = experience if isinstance(experience, dict) else {}
-        candidates = [stored.get(key) for key in
-                      ("experience_level", "experienceLevel", "expLevel", "level", "lvl", "user_level", "rank")]
-        candidates.extend(nested.get(key) for key in ("level", "lvl"))
-        user["level"] = next((value for raw in candidates
-                              if (value := _nonnegative_int(raw)) > 0), None)
     balance_str = usd(stored.get("coins", 0)) if user else "0.00"
     return render_template(
         "index.html", bot_username=_bot_username(), user=user,
