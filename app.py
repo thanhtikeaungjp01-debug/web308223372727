@@ -26,12 +26,12 @@ from flask import (Flask, render_template, request, session, redirect,
                    url_for, jsonify, send_file, abort, g)
 
 try:
-    from web.db          import get_db, reset_db, usd, is_sellable, RARITY_VALUE, DAILY_RARITY_KEYS, DAILY_RARITY_UNLIMITED, _ago, LIST_FEE
+    from web.db          import get_db, reset_db, usd, RARITY_VALUE, DAILY_RARITY_KEYS, DAILY_RARITY_UNLIMITED, _ago, LIST_FEE
     from web.auth        import verify_telegram_login, verify_webapp_data, valid_user_id, set_bot_token, login_required, api_login_required
     from web.config_store import get as _cfg, get_int as _cfg_int, save as _cfg_save, \
                                   reload as _cfg_reload, is_configured, all_config
 except ModuleNotFoundError:
-    from db          import get_db, reset_db, usd, is_sellable, RARITY_VALUE, DAILY_RARITY_KEYS, DAILY_RARITY_UNLIMITED, _ago, LIST_FEE  # type: ignore
+    from db          import get_db, reset_db, usd, RARITY_VALUE, DAILY_RARITY_KEYS, DAILY_RARITY_UNLIMITED, _ago, LIST_FEE  # type: ignore
     from auth        import verify_telegram_login, verify_webapp_data, valid_user_id, set_bot_token, login_required, api_login_required  # type: ignore
     from config_store import get as _cfg, get_int as _cfg_int, save as _cfg_save, \
                                   reload as _cfg_reload, is_configured, all_config  # type: ignore
@@ -139,6 +139,11 @@ AUCTION_MIN_PRICE = {
     "🔵 Rare": 1250,
     "⚪ Common": 750,
 }
+
+
+def is_auctionable(rarity):
+    # Common, Rare, Medium and Legend are collection-only on the web.
+    return RARITY_VALUE.get(rarity, 0) > RARITY_VALUE["🟡 Legend"]
 
 
 @lru_cache(maxsize=128)
@@ -989,7 +994,7 @@ def auction():
     return render_template("auction.html", user=current_user(),
                            auctions=[] if tab == "wins" else [_fmt_listing(row) for row in rows],
                            wins=wins, tab=tab, page=page, has_next=has_next,
-                           auction_floors=AUCTION_MIN_PRICE, is_owner=is_owner())
+                           auction_floors={rarity: price for rarity, price in AUCTION_MIN_PRICE.items() if is_auctionable(rarity)}, is_owner=is_owner())
 
 
 @app.route("/card-update")
@@ -1014,7 +1019,8 @@ def harem():
             seen[cid].update(_format_char_media(c))
         seen[cid]["count"] += 1
     for c in seen.values():
-        c["sellable"]   = is_sellable(c.get("rarity", ""))
+        c["auctionable"] = is_auctionable(c.get("rarity", ""))
+        c["auction_floor"] = AUCTION_MIN_PRICE.get(c.get("rarity", ""), 1)
         c["rarity_val"] = RARITY_VALUE.get(c.get("rarity", ""), 0)
     char_list   = sorted(seen.values(), key=lambda x: x["rarity_val"], reverse=True)
     my_listings = [_fmt_listing(l) for l in db.get_user_listings(uid)]
@@ -1233,6 +1239,9 @@ def api_sell():
     db      = get_db()
     uid     = session["user_id"]
     data    = request.get_json(force=True) or {}
+    if data.get("listing_type") != "auction":
+        return jsonify(ok=False, error="Web listings are auction-only. Fixed-price Market listing is disabled."), 403
+    listing_type = "auction"
     char_id = str(data.get("char_id", "")).strip()
     try:
         price = int(data.get("price", 0))
@@ -1244,21 +1253,19 @@ def api_sell():
     char  = next((c for c in chars if str(c.get("id")) == char_id), None)
     if not char:
         return jsonify({"ok": False, "error": "Character not found in your harem"})
-    listing_type = "auction" if str(data.get("listing_type", "fixed")).lower() == "auction" else "fixed"
-    if listing_type != "auction" and not is_sellable(char.get("rarity", "")):
-        return jsonify({"ok": False, "error": "Only CrossVerse rarity and below can be listed in the fixed market"})
+    if not is_auctionable(char.get("rarity", "")):
+        return jsonify(ok=False, error="This rarity cannot be auctioned. Common, Rare, Medium and Legendary cards are not eligible."), 403
     if not is_owner():
         active = len(db.get_user_listings(uid))
         if active >= 5:
             return jsonify({"ok": False, "error": f"Market limit reached — max 5 active listings ({active}/5). Delist one first."})
-    if listing_type == "auction":
-        auction_floor = int(AUCTION_MIN_PRICE.get(char.get("rarity", ""), 1))
-        if price < auction_floor:
-            return jsonify({"ok": False, "error": f"Auction for {char.get('rarity', 'this rarity')} must start at least {usd(auction_floor)} (half reference price)."})
+    auction_floor = int(AUCTION_MIN_PRICE[char["rarity"]])
+    if price < auction_floor:
+        return jsonify({"ok": False, "error": f"Auction for {char.get('rarity', 'this rarity')} must start at least {usd(auction_floor)} (half reference price)."})
     if db.get_balance(uid) < LIST_FEE:
         return jsonify({"ok": False, "error": f"Need {usd(LIST_FEE)} listing fee"})
-    quota_month = db.reserve_auction_slot(uid) if listing_type == "auction" else None
-    if listing_type == "auction" and not quota_month:
+    quota_month = db.reserve_auction_slot(uid)
+    if not quota_month:
         return jsonify(ok=False, error="Monthly auction limit reached (15/15). Resets on the first day of next month (UTC)."), 429
     try:
         removed = db.remove_char(uid, char_id)
@@ -1271,10 +1278,10 @@ def api_sell():
     db.add_coins(uid, -LIST_FEE)
     seller_name = session.get("first_name", str(uid))
     try:
-        duration_hours = max(1, min(168, int(data.get("duration_hours", 24)))) if listing_type == "auction" else None
+        duration_hours = max(1, min(168, int(data.get("duration_hours", 24))))
     except (TypeError, ValueError):
-        duration_hours = 24 if listing_type == "auction" else None
-    ends_at = time.time() + duration_hours * 3600 if duration_hours else None
+        duration_hours = 24
+    ends_at = time.time() + duration_hours * 3600
     try:
         lid = db.add_listing(uid, seller_name, char, price, listing_type, ends_at)
     except Exception:
@@ -1285,7 +1292,7 @@ def api_sell():
     db.log_transaction("sell_list", uid, uid, LIST_FEE,
                        {"char": char, "listing_id": lid, "price": price})
     return jsonify({"ok": True, "listing_id": lid,
-                    "message": f"Listed {char.get('name')} for {usd(price)}" + (f" as a {duration_hours}h auction" if listing_type == "auction" else "")})
+                    "message": f"Listed {char.get('name')} for {usd(price)} as a {duration_hours}h auction"})
 
 
 @app.route("/api/auction/bid/<listing_id>", methods=["POST"])

@@ -45,8 +45,8 @@ class ControlsTests(unittest.TestCase):
             self.assertTrue(self.store.reserve_auction_slot(43))
         self.assertEqual(self.store.get_balance(43), 100000)
 
-    def test_auction_endpoint_quota_and_fixed_market_independence(self):
-        card={'id':9, 'name':'Quota card', 'rarity':'Common'}
+    def test_auction_endpoint_quota_and_fixed_market_block(self):
+        card={'id':9, 'name':'Quota card', 'rarity':'⚜️ Divine'}
         for _ in range(15): self.store.reserve_auction_slot(42)
         self.store.add_char(42, card)
         response=self.post('/api/sell', {'char_id':'9','price':100000,'listing_type':'auction'})
@@ -54,18 +54,77 @@ class ControlsTests(unittest.TestCase):
         self.assertEqual(len(self.store.get_harem(42)),1)
         self.assertEqual(self.store.get_balance(42),100000)
         response=self.post('/api/sell', {'char_id':'9','price':100000,'listing_type':'fixed'})
-        self.assertTrue(response.json['ok'],response.json)
+        self.assertEqual(response.status_code,403)
+        self.assertFalse(response.json['ok'])
+        self.assertEqual(len(self.store.get_harem(42)),1)
+        self.assertEqual(self.store.get_balance(42),100000)
         self.assertEqual(self.store.get_auction_quota(42)['used'],15)
 
+    def test_fixed_and_implicit_market_listing_blocked_for_owner_and_user(self):
+        for uid in (42,43):
+            self.fixture.identify(uid)
+            self.store.add_char(uid,{'id':99,'name':'Blocked market card','rarity':'⚪ Common'})
+            before=self.store.get_balance(uid)
+            for listing_type in ('fixed', '', None, 'unknown'):
+                payload={'char_id':'99','price':100}
+                if listing_type is not None: payload['listing_type']=listing_type
+                response=self.post('/api/sell',payload)
+                self.assertEqual(response.status_code,403)
+                self.assertEqual(self.store.get_balance(uid),before)
+                self.assertEqual(len(self.store.get_harem(uid)),1)
+                self.assertEqual(self.store.get_auction_quota(uid)['used'],0)
+                self.assertEqual(self.store.get_user_listings(uid),[])
+
+    def test_auction_rarity_rules_and_harem_buttons(self):
+        blocked = ('⚪ Common','🔵 Rare','🟤 Medium','🟡 Legend')
+        for uid in (42,43):
+            self.fixture.identify(uid)
+            for index, rarity in enumerate(blocked + ('Unknown',)):
+                card_id=str(uid*100+index)
+                self.store.add_char(uid,{'id':card_id,'name':rarity,'rarity':rarity})
+                response=self.post('/api/sell',{'char_id':card_id,'price':2000000,'listing_type':'auction'})
+                self.assertEqual(response.status_code,403,rarity)
+            self.assertEqual(self.store.get_balance(uid),100000)
+            self.assertEqual(self.store.get_auction_quota(uid)['used'],0)
+            self.assertEqual(self.store.get_user_listings(uid),[])
+            self.assertEqual(len(self.store.get_harem(uid)),5)
+        allowed=('💮 Mythical','⚜️ Divine','⚡️ CrossVerse','✨ Cataphract','🪞 Supreme','🌸 Special Edition','⛩️ Universal')
+        for index,rarity in enumerate(allowed):
+            self.post('/capacity-release',{})
+            uid=100+index
+            self.store.ensure_user(uid,'Seller',''); self.store.add_coins(uid,1000)
+            self.store.add_char(uid,{'id':str(uid),'name':rarity,'rarity':rarity})
+            self.fixture.identify(uid)
+            page=self.client.get('/harem').get_data(as_text=True)
+            self.assertIn('data-auctionable="true"',page)
+            self.assertIn('btn-sm sell-btn',page)
+            self.assertNotIn('Unsellable',page)
+            self.assertNotIn('sellTypeInput',page)
+            price=web.AUCTION_MIN_PRICE[rarity]
+            self.assertIn(f'data-min-price="{price}"',page)
+            response=self.post('/api/sell',{'char_id':str(uid),'price':price-1,'listing_type':'auction'})
+            self.assertFalse(response.json['ok'])
+            self.assertEqual(self.store.get_auction_quota(uid)['used'],0)
+            response=self.post('/api/sell',{'char_id':str(uid),'price':price,'listing_type':'auction'})
+            self.assertTrue(response.json['ok'],response.json)
+            self.assertEqual(self.store.get_listing(response.json['listing_id'])['listing_type'],'auction')
+            self.assertEqual(self.store.get_balance(uid),1000-web.LIST_FEE)
+            self.assertEqual(self.store.get_auction_quota(uid)['used'],1)
+        self.fixture.identify(43)
+        page=self.client.get('/harem').get_data(as_text=True)
+        self.assertNotIn('btn-sm sell-btn',page)
+        self.assertIn('Collection only',page)
+        self.assertNotIn('Unsellable',page)
+
     def test_failed_removal_refunds_quota(self):
-        self.store.add_char(42, {'id':9,'name':'Card','rarity':'Common'})
+        self.store.add_char(42, {'id':9,'name':'Card','rarity':'⚜️ Divine'})
         with patch.object(self.store,'remove_char', return_value=None):
             response=self.post('/api/sell',{'char_id':'9','price':100000,'listing_type':'auction'})
         self.assertFalse(response.json['ok'])
         self.assertEqual(self.store.get_auction_quota(42)['used'],0)
 
     def test_cancelled_auctions_count_and_failed_creation_refunds(self):
-        card={'id':9,'name':'Card','rarity':'Common'}
+        card={'id':9,'name':'Card','rarity':'⚜️ Divine'}
         self.store.add_char(42,card)
         response=self.post('/api/sell',{'char_id':'9','price':100000,'listing_type':'auction'})
         self.assertTrue(response.json['ok'])

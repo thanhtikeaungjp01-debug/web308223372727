@@ -51,22 +51,22 @@
 <!-- Sell modal -->
 <div class="modal-overlay" id="sellModal" style="display:none">
   <div class="modal">
-    <div class="modal-title">🏷️ List for Sale</div>
+    <div class="modal-title">🔨 List for Auction</div>
     <div class="modal-body">
-      <p>Selling: <strong id="sellCharName"></strong></p>
-      <p class="modal-note">Only CrossVerse rarity and below can be listed.<br>
+      <p>Auction card: <strong id="sellCharName"></strong></p>
+      <p class="modal-note">24-hour auction · 15 listings per calendar month (UTC).<br>
+         Common, Rare, Medium and Legendary cards cannot be auctioned.<br>
          Listing fee: <strong>$0.10</strong> (deducted from balance).</p>
       <div class="form-group">
-        <label class="form-label">Listing type</label>
-        <select id="sellTypeInput" class="form-input"><option value="fixed">Fixed price</option><option value="auction">Auction</option></select>
-        <label class="form-label">Starting price (in $)</label>
+        <label class="form-label" for="sellPriceInput">Starting price (in $)</label>
+        <p class="modal-note" id="auctionMinimum"></p>
         <input type="number" id="sellPriceInput" class="form-input"
                placeholder="e.g. 5.00" min="0.01" step="0.01">
       </div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('sellModal')">Cancel</button>
-      <button class="btn btn-primary" id="sellConfirmBtn">List Now</button>
+      <button class="btn btn-primary" id="sellConfirmBtn">Start Auction</button>
     </div>
   </div>
 </div>
@@ -83,7 +83,7 @@
        data-anime="{{ c.anime | lower }}"
        data-char-id="{{ c.id }}"
        data-char-name="{{ c.name }}"
-       data-sellable="{{ c.sellable | lower }}">
+       data-auctionable="{{ c.auctionable | lower }}">
     <div class="char-img-wrap">
       {% if c.char_video %}
       <video data-video-src="{{ c.char_video }}" class="char-img char-video"
@@ -105,14 +105,15 @@
       <div class="char-anime">{{ c.anime }}</div>
     </div>
     <div class="card-footer">
-      {% if c.sellable %}
+      {% if c.auctionable %}
       <button class="btn btn-primary btn-sm sell-btn"
               data-char-id="{{ c.id }}"
-              data-char-name="{{ c.name }}">
-        🏷️ Sell
+              data-char-name="{{ c.name }}"
+              data-min-price="{{ c.auction_floor }}">
+        🔨 Auction
       </button>
       {% else %}
-      <span class="no-sell-label" title="Cataphract+ cannot be listed">🔒 Unsellable</span>
+      <span class="no-sell-label" title="Common, Rare, Medium and Legendary cards cannot be auctioned">Collection only</span>
       {% endif %}
     </div>
   </div>
@@ -148,19 +149,22 @@ document.querySelectorAll('.sell-btn').forEach(btn => {
     _sellCharId   = btn.dataset.charId;
     _sellCharName = btn.dataset.charName;
     document.getElementById('sellCharName').textContent = _sellCharName;
-    document.getElementById('sellPriceInput').value = '';
+    const minimum = (Number(btn.dataset.minPrice) / 100).toFixed(2);
+    const priceInput = document.getElementById('sellPriceInput');
+    priceInput.min = minimum; priceInput.value = minimum;
+    document.getElementById('auctionMinimum').textContent = `Minimum starting price: $${minimum}`;
     showModal('sellModal');
   });
 });
 
 document.getElementById('sellConfirmBtn').addEventListener('click', async () => {
   const priceVal = parseFloat(document.getElementById('sellPriceInput').value);
-  if (!priceVal || priceVal < 0.01) { showToast('Enter a valid price', 'error'); return; }
+  if (!Number.isFinite(priceVal) || priceVal < Number(document.getElementById('sellPriceInput').min)) { showToast('Enter a valid price', 'error'); return; }
   const priceCents = Math.round(priceVal * 100);
-  const listingType = document.getElementById("sellTypeInput").value;
   const btn = document.getElementById('sellConfirmBtn');
+  if (btn.disabled) return;
   btn.disabled = true; btn.textContent = 'Listing…';
-  const res = await apiPost('/api/sell', { char_id: _sellCharId, price: priceCents, listing_type: listingType, duration_hours: listingType === 'auction' ? 24 : 0 });
+  const res = await apiPost('/api/sell', { char_id: _sellCharId, price: priceCents, listing_type: 'auction', duration_hours: 24 });
   closeModal('sellModal');
   if (res.ok) {
     showToast(`✅ ${res.message}`, 'success');
@@ -171,7 +175,7 @@ document.getElementById('sellConfirmBtn').addEventListener('click', async () => 
   } else {
     showToast(`❌ ${res.error}`, 'error');
   }
-  btn.disabled = false; btn.textContent = 'List Now';
+  btn.disabled = false; btn.textContent = 'Start Auction';
 });
 
 // Close auction buttons
