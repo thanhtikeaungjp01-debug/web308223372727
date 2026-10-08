@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% block title %}{{ status }} — Waifu Market{% endblock %}
+{% block content %}<section class="empty-state"><div class="empty-icon">✧</div><h1>{{ 'Page not found' if status == 404 else 'Something went wrong' }}</h1><p>{{ message }}</p><a class="btn btn-primary" href="{{ url_for('index') }}">Back to home</a></section>{% endblock %}

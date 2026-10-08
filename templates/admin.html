@@ -46,7 +46,7 @@
                    {% if lst.char_img %}poster="{{ lst.char_img }}"{% endif %}></video>
             {% else %}
             <img src="{{ lst.char_img }}" alt="" class="table-char-img"
-                 onerror="this.onerror=null;this.src='/static/img/no_image.png';this.classList.add('img-ready');">
+                 onerror="this.onerror=null;this.src='/static/img/card-placeholder.svg';this.classList.add('img-ready');">
             {% endif %}
             <span>{{ lst.char.name }}</span>
           </td>
@@ -69,13 +69,28 @@
   {% endif %}
 </section>
 
+<!-- Mini app branding -->
+<section class="section">
+  <h2 class="section-title">✦ Mini App Branding</h2>
+  <p class="page-subtitle">Change the name and subtitle shown at the top of the mini app. Upload its photo under Site Logo below.</p>
+  <form id="brandingForm">
+    <div class="settings-grid">
+      <div class="form-group"><label class="form-label" for="cfg-SITE_TITLE">App name</label><input class="form-input" id="cfg-SITE_TITLE" name="SITE_TITLE" type="text" required maxlength="40" value="{{ config.SITE_TITLE }}" placeholder="WAIFU."></div>
+      <div class="form-group"><label class="form-label" for="cfg-SITE_SUBTITLE">Subtitle (optional)</label><input class="form-input" id="cfg-SITE_SUBTITLE" name="SITE_SUBTITLE" type="text" maxlength="64" value="{{ config.SITE_SUBTITLE }}" placeholder="TELEGRAM CATCH BOT"></div>
+    </div>
+    <button class="btn btn-primary btn-sm" id="saveBrandingBtn" type="submit">Save Branding</button>
+    <span id="brandingMsg" role="status" style="margin-left:10px;font-size:.85rem;"></span>
+  </form>
+</section>
+
 <!-- Logo -->
 <section class="section">
   <h2 class="section-title">🖼️ Site Logo</h2>
+  <p class="page-subtitle">This photo appears beside your mini app name. PNG, JPEG, GIF or WebP, up to {{ logo_upload_mb }} MB.</p>
   <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
     <div id="logo-preview-wrap">
       {% if site_logo_url %}
-        <img src="{{ site_logo_url }}" id="logo-preview" style="width:64px;height:64px;border-radius:10px;object-fit:cover;border:1px solid var(--border);">
+        <img src="{{ site_logo_url }}" id="logo-preview" alt="Current site logo" style="width:64px;height:64px;border-radius:10px;object-fit:cover;border:1px solid var(--border);">
       {% else %}
         <div id="logo-preview" style="width:64px;height:64px;border-radius:10px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:2rem;">🌸</div>
       {% endif %}
@@ -83,11 +98,9 @@
     <div style="display:flex;flex-direction:column;gap:8px;">
       <label class="btn btn-primary btn-sm" style="cursor:pointer;display:inline-block;">
         📤 Upload Logo
-        <input type="file" id="logoFileInput" accept="image/*" style="display:none;">
+        <input type="file" id="logoFileInput" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none;">
       </label>
-      {% if site_logo_url %}
-      <button class="btn btn-danger btn-sm" id="logoDeleteBtn">🗑️ Remove</button>
-      {% endif %}
+      <button class="btn btn-danger btn-sm" id="logoDeleteBtn" type="button"{% if not site_logo_url %} style="display:none;"{% endif %}>🗑️ Remove</button>
     </div>
     <span id="logoMsg" style="font-size:.85rem;color:var(--success);display:none;"></span>
   </div>
@@ -122,7 +135,7 @@
     <div class="form-group" style="margin-bottom:0;flex:1;min-width:220px;">
       <label class="form-label">Upload Image / Video Directly</label>
       <input class="form-input" id="adBannerFileInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,video/quicktime,video/ogg">
-      <div class="form-hint" style="color:var(--text3);font-size:.78rem;margin-top:4px;">Maximum 25 MB. Upload လုပ်ပြီးရင် URL မလိုတော့ပါ။</div>
+      <div class="form-hint" style="color:var(--text3);font-size:.78rem;margin-top:4px;">Maximum {{ ad_upload_mb }} MB. Upload လုပ်ပြီးရင် URL မလိုတော့ပါ။</div>
     </div>
     <button class="btn btn-primary" id="uploadAdBannerBtn" type="button">📤 Upload File</button>
     {% if config.AD_BANNER_URL %}<button class="btn btn-danger" id="deleteAdBannerBtn" type="button">🗑️ Remove Ad</button>{% endif %}
@@ -429,7 +442,7 @@
 (() => {
   const groups = {
     overview: ['Top 10 Active Listings'],
-    appearance: ['Site Logo', 'Welcome Images', 'Market Mini Banner Ad', 'Waifu Market Animation'],
+    appearance: ['Mini App Branding', 'Site Logo', 'Welcome Images', 'Market Mini Banner Ad', 'Waifu Market Animation'],
     market: ['Lucky Buy Pool'],
     games: ['Rocket Game', 'Spin Wheel', 'Card Update', 'Daily Rare Rarity Controls', 'Secret Codes'],
     system: ['Connection Settings', 'Website Maintenance Mode']
@@ -491,6 +504,7 @@ document.getElementById('uploadAdBannerBtn')?.addEventListener('click', async ()
   const msg = document.getElementById('adUploadMsg');
   const file = input.files[0];
   if (!file) { showToast('⚠️ Please choose an image or video file first', 'error'); return; }
+  if (file.size > {{ ad_upload_mb }} * 1024 * 1024) { showToast('Maximum {{ ad_upload_mb }} MB per file.', 'error'); return; }
   btn.disabled = true; btn.textContent = '⏳ Uploading…';
   const form = new FormData();
   form.append('ad_banner', file);
@@ -571,54 +585,80 @@ document.getElementById('saveSettingsBtn')?.addEventListener('click', async () =
   }
 });
 
+/* ── Mini app branding ── */
+document.getElementById('brandingForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = document.getElementById('saveBrandingBtn');
+  const message = document.getElementById('brandingMsg');
+  if (button.disabled) return;
+  button.disabled = true;
+  message.textContent = 'Saving…';
+  const result = await apiPost('/api/admin/settings', {
+    SITE_TITLE: document.getElementById('cfg-SITE_TITLE').value.trim(),
+    SITE_SUBTITLE: document.getElementById('cfg-SITE_SUBTITLE').value.trim(),
+  });
+  button.disabled = false;
+  message.textContent = result.ok ? 'Saved. Open Home to see your changes.' : result.error;
+  message.style.color = result.ok ? 'var(--success)' : 'var(--error)';
+});
+
 /* ── Logo upload / delete ── */
 const logoInput = document.getElementById('logoFileInput');
-if (logoInput) {
-  logoInput.addEventListener('change', async () => {
-    const file = logoInput.files[0];
-    if (!file) return;
-    const fd = new FormData();
-    fd.append('logo', file);
-    const msg = document.getElementById('logoMsg');
-    msg.textContent = 'Uploading…'; msg.style.display = 'inline'; msg.style.color = 'var(--text2)';
-    const res  = await fetch('/admin/logo', { method: 'POST', body: fd });
-    const data = await res.json();
-    if (data.ok) {
-      msg.textContent = '✅ Saved!'; msg.style.color = 'var(--success)';
-      const preview = document.getElementById('logo-preview');
-      const img = document.createElement('img');
-      img.id = 'logo-preview';
-      img.style = 'width:64px;height:64px;border-radius:10px;object-fit:cover;border:1px solid var(--border);';
-      img.src = data.url + '?t=' + Date.now();
-      preview.replaceWith(img);
-      setTimeout(() => msg.style.display = 'none', 2500);
-    } else {
-      msg.textContent = '❌ ' + data.error; msg.style.color = 'var(--error)';
-    }
-    logoInput.value = '';
-  });
-}
-
 const logoDeleteBtn = document.getElementById('logoDeleteBtn');
-if (logoDeleteBtn) {
-  logoDeleteBtn.addEventListener('click', async () => {
-    if (!confirm('Remove site logo?')) return;
-    const res  = await fetch('/admin/logo/delete', { method: 'POST' });
-    const data = await res.json();
-    if (data.ok) {
-      showToast('✅ Logo removed.', 'success');
-      const preview = document.getElementById('logo-preview');
-      const div = document.createElement('div');
-      div.id = 'logo-preview';
-      div.style = 'width:64px;height:64px;border-radius:10px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:2rem;';
-      div.textContent = '🌸';
-      preview.replaceWith(div);
-      logoDeleteBtn.style.display = 'none';
-    } else {
-      showToast('❌ ' + data.error, 'error');
-    }
-  });
-}
+logoInput.addEventListener('change', async () => {
+  const file = logoInput.files[0];
+  if (!file) return;
+  const msg = document.getElementById('logoMsg');
+  msg.style.display = 'inline';
+  if (file.size > {{ logo_upload_mb }} * 1024 * 1024) {
+    msg.textContent = 'Logo must be {{ logo_upload_mb }} MB or smaller.';
+    msg.style.color = 'var(--error)';
+    logoInput.value = '';
+    return;
+  }
+  logoInput.disabled = true;
+  logoDeleteBtn.disabled = true;
+  msg.textContent = 'Uploading…';
+  msg.style.color = 'var(--text2)';
+  const fd = new FormData();
+  fd.append('logo', file);
+  const data = await apiRequest('/admin/logo', { method: 'POST', body: fd });
+  logoInput.disabled = false;
+  logoDeleteBtn.disabled = false;
+  logoInput.value = '';
+  if (data.ok) {
+    const img = document.createElement('img');
+    img.id = 'logo-preview';
+    img.alt = 'Current site logo';
+    img.style = 'width:64px;height:64px;border-radius:10px;object-fit:cover;border:1px solid var(--border);';
+    img.src = data.url + '?t=' + Date.now();
+    document.getElementById('logo-preview').replaceWith(img);
+    logoDeleteBtn.style.display = 'inline-flex';
+    msg.textContent = 'Saved. Your mini app logo is updated.';
+    msg.style.color = 'var(--success)';
+  } else {
+    msg.textContent = data.error || 'Upload failed.';
+    msg.style.color = 'var(--error)';
+  }
+});
+logoDeleteBtn.addEventListener('click', async () => {
+  if (!confirm('Remove site logo?')) return;
+  logoDeleteBtn.disabled = true;
+  logoInput.disabled = true;
+  const data = await apiPost('/admin/logo/delete');
+  logoDeleteBtn.disabled = false;
+  logoInput.disabled = false;
+  if (data.ok) {
+    const div = document.createElement('div');
+    div.id = 'logo-preview';
+    div.style = 'width:64px;height:64px;border-radius:10px;background:var(--bg2);border:1px solid var(--border);display:grid;place-items:center;font-size:2rem;';
+    div.textContent = '🌸';
+    document.getElementById('logo-preview').replaceWith(div);
+    logoDeleteBtn.style.display = 'none';
+    document.getElementById('logoMsg').textContent = '';
+    showToast('Logo removed.', 'success');
+  } else showToast(data.error || 'Unable to remove logo.', 'error');
+});
 
 /* ── Welcome carousel upload / delete ── */
 document.getElementById('uploadWelcomeBtn')?.addEventListener('click', async () => {
@@ -626,6 +666,7 @@ document.getElementById('uploadWelcomeBtn')?.addEventListener('click', async () 
   const btn = document.getElementById('uploadWelcomeBtn');
   const msg = document.getElementById('welcomeUploadMsg');
   if (!input.files.length) { showToast('⚠️ Choose one or more images first.', 'error'); return; }
+  if ([...input.files].some(file => file.size > {{ welcome_upload_mb }} * 1024 * 1024)) { showToast('Maximum {{ welcome_upload_mb }} MB per image.', 'error'); return; }
   btn.disabled = true; btn.textContent = '⏳ Uploading…';
   try {
     for (const file of input.files) {

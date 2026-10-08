@@ -7,6 +7,12 @@ services:
     startCommand: python app.py
     healthCheckPath: /healthz
     envVars:
+      - key: SESSION_COOKIE_SECURE
+        value: "1"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: SETUP_KEY
+        generateValue: true
       - key: SESSION_SECRET
         generateValue: true
       - key: BOT_TOKEN

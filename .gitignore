@@ -50,3 +50,15 @@ Thumbs.db
 
 # Runtime media downloaded from the connected Telegram bot
 /data/media_cache/
+
+# Private local configuration and Python runtime files
+.env
+.env.local
+__pycache__/
+*.py[cod]
+/data/*.json
+/data/*.lock
+
+# Generated Vercel CDN assets and CLI metadata
+/public/static/
+.vercel/

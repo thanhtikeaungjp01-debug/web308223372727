@@ -4,34 +4,37 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Waifu Market{% endblock %}</title>
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta name="theme-color" content="#10101c">
+  <meta name="description" content="Discover anime characters, grow your collection, and trade with the Waifu Market community.">
   <meta name="tg-logged-in" content="{{ '1' if user else '0' }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='dashboard-glow-20260913') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  {% block page_styles %}{% endblock %}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script defer src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+    try {
+      const theme = localStorage.getItem('waifu-theme');
+      document.documentElement.dataset.theme = ['dark', 'light', 'blue'].includes(theme) ? theme : 'dark';
+      document.documentElement.dataset.appSize = localStorage.getItem('waifu-app-size') === 'large' ? 'large' : 'small';
+    } catch (_) { document.documentElement.dataset.appSize = 'small'; }
+  </script>
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
 
-<!-- Page loading overlay -->
-<div id="page-loader" class="page-loader">
-  <div class="loader-inner">
-    <div class="sakura-spinner">
-      <span>🌸</span>
-    </div>
-    <p class="loader-text">Loading…</p>
-  </div>
-</div>
+<a class="skip-link" href="#main-content">Skip to content</a>
 
-{% if request.endpoint != 'index' %}
 <!-- Navbar -->
+{% block navigation %}
 <nav class="navbar">
-  <a href="{{ url_for('market') }}" class="nav-brand">
+  <a href="{{ url_for('index') }}" class="nav-brand">
     {% if site_logo_url %}
       <img src="{{ site_logo_url }}" alt="logo" class="brand-logo" decoding="async" fetchpriority="high">
     {% else %}
       <span class="brand-icon">🌸</span>
     {% endif %}
-    <span class="brand-name brand-name--animated" id="brandName">Guess Market</span>
+    <span class="brand-name" id="brandName">Waifu Market</span>
   </a>
   <span class="bot-status-dot" id="botStatusDot" title="Bot: checking..."></span>
   <button class="nav-toggle" id="navToggle" type="button"
@@ -41,17 +44,31 @@
     <span class="nav-toggle-line"></span>
   </button>
 </nav>
+{% endblock %}
 
 <!-- Main menu (opened with the hamburger button) -->
-<div class="mobile-menu" id="mobileMenu" aria-hidden="true">
+<div class="mobile-menu" id="mobileMenu" aria-hidden="true" inert>
   <div class="mobile-menu-inner">
-    <div class="mobile-menu-label">Main menu</div>
-    <div class="theme-switcher" id="themeSwitcher" aria-label="Choose theme">
-      <span class="theme-switcher-label">🎨 Theme</span>
-      <button type="button" class="theme-choice" data-theme="dark" aria-label="Black theme" aria-pressed="false">◐</button>
-      <button type="button" class="theme-choice" data-theme="light" aria-label="White theme" aria-pressed="false">☀</button>
-      <button type="button" class="theme-choice" data-theme="blue" aria-label="Blue theme" aria-pressed="false">💧</button>
-    </div>
+    <div class="mobile-menu-label">Explore your world</div>
+    <a href="{{ url_for('index') }}" class="mobile-link {% if request.endpoint == 'index' %}active{% endif %}"><span class="mobile-link-icon">⌂</span><span>Home</span><span class="mobile-link-arrow">›</span></a>
+    <section class="display-settings" aria-label="Display settings">
+      <div class="display-setting" role="group" aria-labelledby="appSizeLabel">
+        <span class="display-setting-label" id="appSizeLabel">Mini App Size</span>
+        <div class="display-choices">
+          <button type="button" class="size-choice" data-app-size="small" aria-pressed="false">↙ Small</button>
+          <button type="button" class="size-choice" data-app-size="large" aria-pressed="false">↗ Large</button>
+        </div>
+      </div>
+      <div class="display-setting" id="themeSwitcher" role="group" aria-labelledby="themeLabel">
+        <span class="display-setting-label" id="themeLabel">Theme</span>
+        <div class="display-choices">
+          <button type="button" class="theme-choice" data-theme="dark" aria-pressed="false">◐ Dark</button>
+          <button type="button" class="theme-choice" data-theme="light" aria-pressed="false">☀ Light</button>
+          <button type="button" class="theme-choice" data-theme="blue" aria-pressed="false">◈ Blue</button>
+        </div>
+      </div>
+      <p class="display-status" id="displayStatus" role="status"></p>
+    </section>
     <a href="{{ url_for('market') }}" class="mobile-link {% if request.endpoint == 'market' %}active{% endif %}">
       <span class="mobile-link-icon">🏪</span><span>Market</span><span class="mobile-link-arrow">›</span>
     </a>
@@ -61,6 +78,8 @@
     </a>
     {% endif %}
   {% if user %}
+    <a href="{{ url_for('harem') }}" class="mobile-link {% if request.endpoint == 'harem' %}active{% endif %}"><span class="mobile-link-icon">♡</span><span>My harem</span><span class="mobile-link-arrow">›</span></a>
+    <a href="{{ url_for('auction') }}" class="mobile-link {% if request.endpoint == 'auction' %}active{% endif %}"><span class="mobile-link-icon">♧</span><span>Auctions</span><span class="mobile-link-arrow">›</span></a>
     <a href="{{ url_for('wallet') }}" class="mobile-link {% if request.endpoint == 'wallet' %}active{% endif %}">
       <span class="mobile-link-icon">💵</span><span>Wallet</span><span class="mobile-link-arrow">›</span>
     </a>
@@ -69,18 +88,18 @@
       <span class="mobile-link-icon">⚙️</span><span>Admin</span><span class="mobile-link-arrow">›</span>
     </a>
     {% endif %}
+    <form action="{{ url_for('logout') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="mobile-link logout-button" type="submit"><span class="mobile-link-icon">↪</span><span>Log out</span></button></form>
   {% else %}
-    <a href="{{ url_for('index') }}" class="mobile-link">
+    <a href="{{ url_for('index') }}#login" class="mobile-link">
       <span class="mobile-link-icon">🔑</span><span>Login</span><span class="mobile-link-arrow">›</span>
     </a>
   {% endif %}
   </div>
 </div>
-{% endif %}
 
 
 <!-- Flash/toast container -->
-<div id="toast-container" class="toast-container"></div>
+<div id="toast-container" class="toast-container" role="status" aria-live="polite"></div>
 
 {% if ad_banner_url and request.endpoint == 'market' %}
 <!-- Market mini-banner ad: configured from the owner Admin panel. -->
@@ -100,7 +119,7 @@
 </div>
 {% endif %}
 
-<main class="main-content">
+<main class="main-content" id="main-content" tabindex="-1">
   {% block content %}{% endblock %}
 </main>
 
@@ -108,42 +127,8 @@
   <p>🌸 Waifu Guess Market • Powered By @osamu1123</p>
 </footer>
 
-<script src="{{ url_for('static', filename='js/app.js', v='auction-page-20260913') }}"></script>
-<script>
-(() => {
-  const root = document.documentElement;
-  const choices = document.querySelectorAll('.theme-choice');
-  const allowed = ['dark', 'light', 'blue'];
-  const saved = localStorage.getItem('waifu-theme');
-  const setTheme = (theme) => {
-    const value = allowed.includes(theme) ? theme : 'dark';
-    root.dataset.theme = value;
-    localStorage.setItem('waifu-theme', value);
-    choices.forEach((button) => {
-      button.setAttribute('aria-pressed', String(button.dataset.theme === value));
-    });
-  };
-  setTheme(saved || 'dark');
-  choices.forEach((button) => button.addEventListener('click', () => setTheme(button.dataset.theme)));
-})();
-</script>
-<script>
-(() => {
-  const brand = document.getElementById('brandName');
-  if (!brand) return;
-  const animations = [
-    'brand-anim-shimmer', 'brand-anim-pulse', 'brand-anim-float',
-    'brand-anim-bounce', 'brand-anim-sway', 'brand-anim-glow',
-    'brand-anim-rainbow', 'brand-anim-wobble', 'brand-anim-heartbeat',
-    'brand-anim-electric'
-  ];
-  const configured = {{ (config.BRAND_ANIMATION or 'random') | tojson }};
-  const chosen = configured === 'random' || !animations.includes(configured)
-    ? animations[Math.floor(Math.random() * animations.length)]
-    : configured;
-  brand.classList.add(chosen);
-})();
-</script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/preferences.js') }}"></script>
 {% if ad_banner_url and request.endpoint == 'market' %}
 <script>
 (() => {
@@ -175,7 +160,9 @@
   const timer = window.setInterval(heartbeat, 20000);
   window.addEventListener('pagehide', () => {
     window.clearInterval(timer);
-    try { navigator.sendBeacon('{{ url_for("capacity_release") }}', 'release=1'); } catch (_) {}
+    const body = new FormData();
+    body.set('csrf_token', document.querySelector('meta[name="csrf-token"]').content);
+    try { navigator.sendBeacon('{{ url_for("capacity_release") }}', body); } catch (_) {}
   });
 })();
 </script>

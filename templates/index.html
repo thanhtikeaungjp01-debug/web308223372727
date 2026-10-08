@@ -1,51 +1,70 @@
 {% extends "base.html" %}
-{% block title %}Waifu Dashboard{% endblock %}
+{% from "partials/mini_icon.html" import icon %}
+{% block title %}Waifu — Your universe{% endblock %}
+{% block body_class %}mini-home{% endblock %}
+{% block page_styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/mini-home.css') }}">{% endblock %}
+{% block navigation %}
+<header class="mini-topbar">
+  <a class="mini-wordmark" href="{{ url_for('index') }}" aria-label="{{ config.SITE_TITLE }} home">
+    {% if site_logo_url %}<img class="mini-brand-logo" src="{{ site_logo_url }}" alt="" width="38" height="38" decoding="async">{% else %}{{ icon('star') }}{% endif %}
+    <span class="mini-brand-copy"><span class="mini-brand-title">{{ config.SITE_TITLE }}</span>{% if config.SITE_SUBTITLE %}<small>{{ config.SITE_SUBTITLE }}</small>{% endif %}</span>
+  </a>
+  <button class="mini-menu-button" id="navToggle" type="button" aria-label="Open main menu" aria-expanded="false" aria-controls="mobileMenu">{{ icon('dots') }}</button>
+</header>
+{% endblock %}
 {% block content %}
-<div class="dashboard-page">
-  <section class="dashboard-profile">
-    <div class="dashboard-avatar">
-      {% if user and user.photo_url %}<img src="{{ user.photo_url }}" alt="{{ user.first_name }}" loading="eager" onerror="this.onerror=null;this.style.display='none';this.parentElement.textContent='{{ (user.first_name[:1] if user.first_name else 'U')|upper }}';">{% elif user %}{{ user.first_name[:1] | upper }}{% else %}U{% endif %}
+<div class="mini-dashboard">
+  <section class="mini-profile" aria-label="Your profile">
+    <div class="mini-identity">
+      <div class="mini-avatar">
+        {% if user %}
+          <span>{{ (user.first_name[:1] or 'U')|upper }}</span>
+          {% if user.photo_url %}<img src="{{ user.photo_url }}" alt="" width="64" height="64" decoding="async" onerror="this.remove()">{% endif %}
+        {% else %}<img src="{{ url_for('static', filename='img/waifu-avatar.webp') }}" alt="" width="64" height="64">{% endif %}
+        <span class="mini-avatar-spark">✦</span>
+      </div>
+      <div class="mini-profile-name"><span class="mini-overline">{{ 'WELCOME BACK' if user else 'WELCOME, COLLECTOR' }}</span><h1>{{ user.first_name if user else 'Your story' }}<span class="mini-name-star" aria-hidden="true">✧</span></h1><p>{{ '@' ~ user.username if user and user.username else ('Waifu collector' if user else 'begins here.') }}</p></div>
     </div>
-    <div class="dashboard-identity">
-      <h1>{{ user.first_name if user else 'Welcome' }}</h1>
-      <p>{% if user and user.username %}@{{ user.username }}{% else %}Waifu player{% endif %}</p>
-    </div>
-    <div class="dashboard-balance"><strong>{{ balance_str }}</strong></div>
+    <a class="mini-balance" href="{{ url_for('wallet') }}" aria-label="{{ 'Wallet balance ' ~ balance_str if user else 'Sign in to view wallet' }}"><span class="mini-balance-copy"><small>BALANCE</small><strong>{{ balance_str if user else '—' }}</strong></span><span class="mini-coin" aria-hidden="true">💸</span></a>
+  </section>
+  <section class="mini-level" aria-label="Collector level">
+    <div class="mini-level-label"><span>LVL <strong>{{ user.level if user else '—' }}</strong></span><small>{{ (level_progress|int) ~ '% to next level' if user else 'A new adventure awaits' }}</small></div>
+    <div class="mini-level-track" role="progressbar" aria-label="Progress to next level" aria-valuenow="{{ level_progress|int if user else 0 }}" aria-valuemin="0" aria-valuemax="100"><span style="width:{{ level_progress if user else 0 }}%"></span></div>
   </section>
 
-  <div class="dashboard-level"><span>LVL {{ user.level if user else 1 }}</span><div><i style="width:{{ level_progress if user else 12 }}%"></i></div></div>
-
-  {% if welcome_slides %}
-  <section class="dashboard-welcome" aria-label="Welcome">
-    <div class="dashboard-welcome-track">
-      {% for slide in welcome_slides %}<img class="dashboard-welcome-slide{% if loop.first %} is-active{% endif %}" src="{{ slide }}" alt="Welcome">{% endfor %}
+  <section class="mini-welcome" aria-label="Welcome to your waifu universe">
+    <div class="mini-banner-track" id="miniBannerTrack">
+      {% set slides = welcome_slides or [url_for('static', filename='img/waifu-welcome.webp')] %}
+      {% for slide in slides %}
+      <a class="mini-banner" href="{{ url_for('market') }}" aria-label="Explore the market{{ ', highlight ' ~ loop.index if slides|length > 1 else '' }}">
+        <img src="{{ slide }}" alt="" width="1080" height="383" loading="{{ 'eager' if loop.first else 'lazy' }}" fetchpriority="{{ 'high' if loop.first else 'auto' }}" decoding="async" onerror="this.onerror=null;this.src='{{ url_for('static', filename='img/waifu-welcome.webp') }}'">
+        <span class="mini-banner-tag">{{ icon('star') }} A WORLD OF FAVORITES</span>
+        <span class="mini-banner-caption"><span><small>WELCOME HOME</small></span><span class="mini-banner-arrow">{{ icon('arrow') }}</span></span>
+      </a>
+      {% endfor %}
     </div>
-    <span class="dashboard-welcome-label">WELCOME</span>
-    {% if welcome_slides|length > 1 %}<div class="dashboard-dots">{% for slide in welcome_slides %}<i class="{% if loop.first %}is-active{% endif %}"></i>{% endfor %}</div>{% endif %}
+    {% if slides|length > 1 %}<div class="mini-banner-dots" aria-label="Choose welcome highlight">{% for slide in slides %}<button type="button" aria-label="Show highlight {{ loop.index }}" aria-pressed="{{ 'true' if loop.first else 'false' }}" data-slide="{{ loop.index0 }}"></button>{% endfor %}</div>{% endif %}
   </section>
-  {% else %}
-  <section class="dashboard-welcome dashboard-welcome-empty"><span>WELCOME</span></section>
-  {% endif %}
 
-  <nav class="dashboard-actions" aria-label="Main actions">
-    <a href="{{ url_for('market') }}" class="dashboard-action"><span>🏪</span><b>Market</b></a>
-    {% if user %}<a href="{{ url_for('wallet') }}" class="dashboard-action"><span>▣</span><b>Wallet</b></a>{% else %}<a href="{{ url_for('index') }}" class="dashboard-action"><span>▣</span><b>Wallet</b></a>{% endif %}
-    <a href="{{ url_for('market') }}" class="dashboard-action"><span>▥</span><b>Cleaning</b></a>
-    <a href="{{ url_for('market') }}" class="dashboard-action"><span>🛒</span><b>Purchase</b></a>
-    <a href="{{ url_for('auction') }}" class="dashboard-action" aria-label="Open Auctions"><span>✎</span><b>Auction</b></a>
+  <div class="mini-section-label"><span>MAKE IT YOURS</span><span class="mini-section-star" aria-hidden="true">✧</span></div>
+  <nav class="mini-actions" aria-label="Main actions">
+    {% for endpoint, title, symbol in [('market','Market','market'),('harem','Harem','harem'),('wallet','Wallet','wallet'),('auction','Auctions','auction')] %}
+    <a class="mini-action mini-action--{{ symbol }}" href="{{ url_for(endpoint) }}"><span class="mini-action-tile">{{ icon(symbol) }}</span><span>{{ title }}</span></a>
+    {% endfor %}
   </nav>
-</div>
-{% endblock %}
-{% block scripts %}
-{% if welcome_slides|length > 1 %}<script>
-(() => {
-  const slides = [...document.querySelectorAll('.dashboard-welcome-slide')];
-  const dots = [...document.querySelectorAll('.dashboard-dots i')]; let current = 0;
-  setInterval(() => { slides[current].classList.remove('is-active'); dots[current]?.classList.remove('is-active'); current=(current+1)%slides.length; slides[current].classList.add('is-active'); dots[current]?.classList.add('is-active'); }, 2000);
-})();
-</script>{% endif %}
-{% endblock %}
 
-{% if not bot_username and not user %}
-<!-- The dashboard remains usable as a visual landing page even before Telegram setup. -->
-{% endif %}
+  {% if rocket_show or card_update_show %}<nav class="mini-extras" aria-label="More activities">{% if rocket_show %}<a href="{{ url_for('rocket') }}">{{ icon('rocket') }} Rocket {{ icon('arrow') }}</a>{% endif %}{% if card_update_show %}<a href="{{ url_for('card_update_page') }}">{{ icon('star') }} Card upgrade {{ icon('arrow') }}</a>{% endif %}</nav>{% endif %}
+
+  <p class="mini-owner">Guess Bot Owner - <a href="https://t.me/osamu1123" target="_blank" rel="noopener noreferrer">@osamu1123</a></p>
+  {% if not user %}
+  <section class="mini-login" id="login" aria-label="Telegram sign-in">
+    <p id="auth-status" role="status">{% if request.args.get('error') %}Your login link expired. Open a fresh link from the bot.{% endif %}</p>
+    {% if bot_username %}<div class="mini-login-actions"><script async src="https://telegram.org/js/telegram-widget.js?22" data-telegram-login="{{ bot_username }}" data-size="large" data-auth-url="{{ url_for('telegram_auth', _external=True) }}" data-request-access="write"></script><a href="https://t.me/{{ bot_username }}" target="_blank" rel="noopener noreferrer">Open bot ↗</a></div>{% endif %}
+  </section>
+  {% endif %}
+</div>
+<nav class="mini-dock" aria-label="Bottom navigation">
+  {% for endpoint,title,symbol in [('index','Home','home'),('market','Market','market'),('harem','Harem','harem'),('wallet','Wallet','wallet')] %}<a href="{{ url_for(endpoint) }}"{% if endpoint == 'index' %} aria-current="page"{% endif %}>{{ icon(symbol) }}<span>{{ title }}</span></a>{% endfor %}
+</nav>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/mini-home.js') }}"></script>{% endblock %}

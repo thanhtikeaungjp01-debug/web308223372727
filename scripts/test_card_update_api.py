@@ -38,6 +38,8 @@ try:
         session["robot_verified_at"] = time.time()
 
     page = client.get("/card-update")
+    with client.session_transaction() as session:
+        client.environ_base["HTTP_X_CSRF_TOKEN"] = session["csrf_token"]
     assert page.status_code == 200
     assert b"Card Update Roulette" in page.data
 

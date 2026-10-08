@@ -1,0 +1,16 @@
+{% macro icon(name, class_name='') -%}
+<svg class="mini-icon {{ class_name }}" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+{% if name == 'market' %}<path d="m4 9 1.5-5h13L20 9M4 9v11h16V9M3 9h18M8 4l-1 5m5-5v5m4-5 1 5M9 20v-6h6v6"/><path d="M4 9a2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0"/>
+{% elif name == 'harem' %}<rect x="7" y="3" width="13" height="17" rx="3"/><path d="M4 6H3v13a3 3 0 0 0 3 3h10M13.5 8c-3-3-6 2 0 5 6-3 3-8 0-5Z"/>
+{% elif name == 'wallet' %}<path d="M20 8H5a2 2 0 0 1 0-4h12v4M3 6v12a2 2 0 0 0 2 2h15V8"/><path d="M20 12h-5v4h5"/><path d="M16.5 14h.01"/>
+{% elif name == 'auction' %}<path d="m13 3 8 8-4 4-8-8 4-4ZM3 13l8 8M4 20l8-8M2 22h11"/>
+{% elif name == 'home' %}<path d="m3 10 9-7 9 7v10H3V10Z"/><path d="M9 20v-7h6v7"/>
+{% elif name == 'star' %}<path d="m12 2 2.8 6.7L22 12l-7.2 2.8L12 22l-2.8-7.2L2 12l7.2-3.3L12 2Z"/>
+{% elif name == 'coin' %}<path d="m12 2 8.5 5v10L12 22l-8.5-5V7L12 2Z"/><path d="m3.5 7 8.5 5 8.5-5M12 2v20m-8.5-5L12 12l8.5 5"/>
+{% elif name == 'arrow' %}<path d="M5 12h14m-5-5 5 5-5 5"/>
+{% elif name == 'telegram' %}<path d="m3 10 18-7-5 18-5-6-4 3v-6l10-6-8 8-6-4Z"/>
+{% elif name == 'dots' %}<circle cx="12" cy="5" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="19" r="1" fill="currentColor"/>
+{% elif name == 'rocket' %}<path d="M8 16c-5-8 5-14 13-13 1 8-5 18-13 13Zm0 0-4 4m2-9-4 1v5h5m6 1v4h5l1-4"/><circle cx="15" cy="9" r="2"/>
+{% endif %}
+</svg>
+{%- endmacro %}

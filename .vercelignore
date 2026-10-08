@@ -1,0 +1,21 @@
+# Only the Flask mini app is deployed. Keep the unrelated Node demo out.
+artifacts/
+lib/
+attached_assets/
+node_modules/
+package.json
+package-lock.json
+pnpm-lock.yaml
+pnpm-workspace.yaml
+yarn.lock
+tsconfig*.json
+.agents/
+.git/
+.venv/
+venv/
+**/__pycache__/
+**/*.pyc
+.env
+.env.*
+data/
+scripts/test_*.py
