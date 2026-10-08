@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}My Harem — Waifu Market{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <a href="{{ url_for('index') }}" class="btn btn-ghost btn-sm" style="position:absolute;right:0;top:-10px;z-index:2;">‹ Back</a>
+  <h1 class="page-title">💞 My Harem
+    <span class="badge-count">{{ chars | length }}</span>
+  </h1>
+  <p class="page-subtitle">Your character collection</p>
+</div>
+
+<!-- My active listings -->
+{% if my_listings %}
+<section class="section">
+  <h2 class="section-title">🏷️ My Active Listings ({{ my_listings | length }})</h2>
+  <div class="listing-table-wrap">
+    <table class="listing-table">
+      <thead>
+        <tr>
+          <th>Character</th>
+          <th>Rarity</th>
+          <th>Price</th>
+          <th>Listed</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for lst in my_listings %}
+        <tr id="listing-row-{{ lst._id_str }}">
+          <td class="td-char">
+            <img src="{{ lst.char_img }}" alt="" class="table-char-img"
+                 onerror="this.src='/static/img/no_image.png'">
+            <span>{{ lst.char.name }}</span>
+          </td>
+          <td>{{ lst.char.rarity }}</td>
+          <td class="price-cell">{{ lst.price_str }}</td>
+          <td>{{ lst.ago }}</td>
+          <td>
+            <button class="btn btn-danger btn-xs delist-btn"
+                    data-lid="{{ lst._id_str }}">❌ Delist</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<!-- Sell modal -->
+<div class="modal-overlay" id="sellModal" style="display:none">
+  <div class="modal">
+    <div class="modal-title">🏷️ List for Sale</div>
+    <div class="modal-body">
+      <p>Selling: <strong id="sellCharName"></strong></p>
+      <p class="modal-note">Only CrossVerse rarity and below can be listed.<br>
+         Listing fee: <strong>$0.10</strong> (deducted from balance).</p>
+      <div class="form-group">
+        <label class="form-label">Listing type</label>
+        <select id="sellTypeInput" class="form-input"><option value="fixed">Fixed price</option><option value="auction">Auction</option></select>
+        <label class="form-label">Starting price (in $)</label>
+        <input type="number" id="sellPriceInput" class="form-input"
+               placeholder="e.g. 5.00" min="0.01" step="0.01">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('sellModal')">Cancel</button>
+      <button class="btn btn-primary" id="sellConfirmBtn">List Now</button>
+    </div>
+  </div>
+</div>
+
+<!-- Character grid -->
+{% if chars %}
+<div class="harem-controls">
+  <input type="text" id="haremSearch" class="search-input" placeholder="🔍 Search collection…" style="max-width:300px">
+</div>
+<div class="card-grid" id="haremGrid">
+  {% for c in chars %}
+  <div class="char-card harem-card"
+       data-name="{{ c.name | lower }}"
+       data-anime="{{ c.anime | lower }}"
+       data-char-id="{{ c.id }}"
+       data-char-name="{{ c.name }}"
+       data-sellable="{{ c.sellable | lower }}">
+    <div class="char-img-wrap">
+      {% if c.char_video %}
+      <video src="{{ c.char_video }}" class="char-img char-video"
+             controls playsinline preload="metadata"
+             {% if c.char_img %}poster="{{ c.char_img }}"{% endif %}
+             aria-label="{{ c.name }} video">
+      </video>
+      {% else %}
+      <img src="{{ c.char_img or c.img }}" alt="{{ c.name }}" class="char-img" loading="lazy"
+           onerror="this.src='/static/img/no_image.png'">
+      {% endif %}
+      <div class="rarity-badge">{{ c.rarity }}</div>
+      {% if c.count > 1 %}
+      <div class="count-badge">×{{ c.count }}</div>
+      {% endif %}
+    </div>
+    <div class="char-info">
+      <div class="char-name">{{ c.name }}</div>
+      <div class="char-anime">{{ c.anime }}</div>
+    </div>
+    <div class="card-footer">
+      {% if c.sellable %}
+      <button class="btn btn-primary btn-sm sell-btn"
+              data-char-id="{{ c.id }}"
+              data-char-name="{{ c.name }}">
+        🏷️ Sell
+      </button>
+      {% else %}
+      <span class="no-sell-label" title="Cataphract+ cannot be listed">🔒 Unsellable</span>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">🌸</div>
+  <div class="empty-title">Your harem is empty</div>
+  <div class="empty-desc">Catch characters in Telegram groups to build your collection.</div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _sellCharId   = null;
+let _sellCharName = null;
+
+// Search filter
+document.getElementById('haremSearch')?.addEventListener('input', function() {
+  const q = this.value.toLowerCase();
+  document.querySelectorAll('.harem-card').forEach(card => {
+    const match = card.dataset.name.includes(q) || card.dataset.anime.includes(q);
+    card.style.display = match ? '' : 'none';
+  });
+});
+
+// Sell buttons
+document.querySelectorAll('.sell-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    _sellCharId   = btn.dataset.charId;
+    _sellCharName = btn.dataset.charName;
+    document.getElementById('sellCharName').textContent = _sellCharName;
+    document.getElementById('sellPriceInput').value = '';
+    showModal('sellModal');
+  });
+});
+
+document.getElementById('sellConfirmBtn').addEventListener('click', async () => {
+  const priceVal = parseFloat(document.getElementById('sellPriceInput').value);
+  if (!priceVal || priceVal < 0.01) { showToast('Enter a valid price', 'error'); return; }
+  const priceCents = Math.round(priceVal * 100);
+  const listingType = document.getElementById("sellTypeInput").value;
+  const btn = document.getElementById('sellConfirmBtn');
+  btn.disabled = true; btn.textContent = 'Listing…';
+  const res = await apiPost('/api/sell', { char_id: _sellCharId, price: priceCents, listing_type: listingType, duration_hours: listingType === 'auction' ? 24 : 0 });
+  closeModal('sellModal');
+  if (res.ok) {
+    showToast(`✅ ${res.message}`, 'success');
+    // remove card from grid (or update count)
+    const card = document.querySelector(`[data-char-id="${_sellCharId}"]`);
+    if (card) card.remove();
+    setTimeout(() => location.reload(), 1200);
+  } else {
+    showToast(`❌ ${res.error}`, 'error');
+  }
+  btn.disabled = false; btn.textContent = 'List Now';
+});
+
+// Close auction buttons
+ document.querySelectorAll('.close-auction-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    if (!confirm('Close this auction? The highest bidder gets the card.')) return;
+    const res = await apiPost(`/api/auction/close/${btn.dataset.lid}`);
+    if (res.ok) { showToast(res.sold ? '✅ Auction closed and card transferred.' : '✅ Auction cancelled; card returned.', 'success'); setTimeout(() => location.reload(), 700); }
+    else showToast(`❌ ${res.error}`, 'error');
+  });
+});
+// Delist buttons (active listings table)
+document.querySelectorAll('.delist-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    if (!confirm('Delist this character? It will return to your harem.')) return;
+    const lid = btn.dataset.lid;
+    const res = await apiPost(`/api/delist/${lid}`);
+    if (res.ok) {
+      showToast('✅ Delisted — character returned to your harem.', 'success');
+      document.getElementById(`listing-row-${lid}`)?.remove();
+      setTimeout(() => location.reload(), 1200);
+    } else {
+      showToast(`❌ ${res.error}`, 'error');
+    }
+  });
+});
+</script>
+{% endblock %}

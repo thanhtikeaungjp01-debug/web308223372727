@@ -1,0 +1,1 @@
+- [Telegram media caching](telegram-media-caching.md) — serve bot file IDs through a disk-backed same-origin cache instead of direct browser downloads.

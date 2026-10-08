@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: waifu-web-market
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /healthz
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: BOT_TOKEN
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: OWNER_ID
+        sync: false
+      - key: BOT_USERNAME
+        sync: false
+      - key: BOT_API_URL
+        sync: false
+      - key: BOT_API_KEY
+        sync: false
+      - key: PORT
+        value: "10000"

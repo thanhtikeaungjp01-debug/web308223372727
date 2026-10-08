@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Waifu Market{% endblock %}</title>
+  <meta name="tg-logged-in" content="{{ '1' if user else '0' }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='dashboard-glow-20260913') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+
+<!-- Page loading overlay -->
+<div id="page-loader" class="page-loader">
+  <div class="loader-inner">
+    <div class="sakura-spinner">
+      <span>🌸</span>
+    </div>
+    <p class="loader-text">Loading…</p>
+  </div>
+</div>
+
+{% if request.endpoint != 'index' %}
+<!-- Navbar -->
+<nav class="navbar">
+  <a href="{{ url_for('market') }}" class="nav-brand">
+    {% if site_logo_url %}
+      <img src="{{ site_logo_url }}" alt="logo" class="brand-logo" decoding="async" fetchpriority="high">
+    {% else %}
+      <span class="brand-icon">🌸</span>
+    {% endif %}
+    <span class="brand-name brand-name--animated" id="brandName">Guess Market</span>
+  </a>
+  <span class="bot-status-dot" id="botStatusDot" title="Bot: checking..."></span>
+  <button class="nav-toggle" id="navToggle" type="button"
+          aria-label="Open main menu" aria-expanded="false" aria-controls="mobileMenu">
+    <span class="nav-toggle-line"></span>
+    <span class="nav-toggle-line"></span>
+    <span class="nav-toggle-line"></span>
+  </button>
+</nav>
+
+<!-- Main menu (opened with the hamburger button) -->
+<div class="mobile-menu" id="mobileMenu" aria-hidden="true">
+  <div class="mobile-menu-inner">
+    <div class="mobile-menu-label">Main menu</div>
+    <div class="theme-switcher" id="themeSwitcher" aria-label="Choose theme">
+      <span class="theme-switcher-label">🎨 Theme</span>
+      <button type="button" class="theme-choice" data-theme="dark" aria-label="Black theme" aria-pressed="false">◐</button>
+      <button type="button" class="theme-choice" data-theme="light" aria-label="White theme" aria-pressed="false">☀</button>
+      <button type="button" class="theme-choice" data-theme="blue" aria-label="Blue theme" aria-pressed="false">💧</button>
+    </div>
+    <a href="{{ url_for('market') }}" class="mobile-link {% if request.endpoint == 'market' %}active{% endif %}">
+      <span class="mobile-link-icon">🏪</span><span>Market</span><span class="mobile-link-arrow">›</span>
+    </a>
+    {% if rocket_show %}
+    <a href="{{ url_for('rocket') }}" class="mobile-link {% if request.endpoint == 'rocket' %}active{% endif %}">
+      <span class="mobile-link-icon">🚀</span><span>Rocket</span><span class="mobile-link-arrow">›</span>
+    </a>
+    {% endif %}
+  {% if user %}
+    <a href="{{ url_for('wallet') }}" class="mobile-link {% if request.endpoint == 'wallet' %}active{% endif %}">
+      <span class="mobile-link-icon">💵</span><span>Wallet</span><span class="mobile-link-arrow">›</span>
+    </a>
+    {% if is_owner is defined and is_owner %}
+    <a href="{{ url_for('admin') }}" class="mobile-link {% if request.endpoint == 'admin' %}active{% endif %}">
+      <span class="mobile-link-icon">⚙️</span><span>Admin</span><span class="mobile-link-arrow">›</span>
+    </a>
+    {% endif %}
+  {% else %}
+    <a href="{{ url_for('index') }}" class="mobile-link">
+      <span class="mobile-link-icon">🔑</span><span>Login</span><span class="mobile-link-arrow">›</span>
+    </a>
+  {% endif %}
+  </div>
+</div>
+{% endif %}
+
+
+<!-- Flash/toast container -->
+<div id="toast-container" class="toast-container"></div>
+
+{% if ad_banner_url and request.endpoint == 'market' %}
+<!-- Market mini-banner ad: configured from the owner Admin panel. -->
+<div class="ad-mini-banner" id="adBanner" role="complementary" aria-label="Advertisement">
+  <span class="ad-mini-label">ADS</span>
+  <button class="ad-mini-close" id="adBannerClose" type="button" aria-label="Close advertisement">×</button>
+  {% set ad_url = ad_banner_url %}
+  {% set ad_path = ad_url.split('?')[0].lower() %}
+  {% set ad_is_video = ad_banner_is_video or ad_path.endswith('.mp4') or ad_path.endswith('.webm') or ad_path.endswith('.mov') or ad_path.endswith('.m4v') or ad_path.endswith('.ogv') %}
+  {% if config.AD_BANNER_LINK %}<a href="{{ config.AD_BANNER_LINK }}" target="_blank" rel="noopener noreferrer" class="ad-mini-link">{% endif %}
+    {% if ad_is_video %}
+    <video class="ad-mini-media" src="{{ ad_url }}" autoplay muted loop playsinline preload="metadata"></video>
+    {% else %}
+    <img class="ad-mini-media" src="{{ ad_url }}" alt="Advertisement" decoding="async" fetchpriority="high">
+    {% endif %}
+  {% if config.AD_BANNER_LINK %}</a>{% endif %}
+</div>
+{% endif %}
+
+<main class="main-content">
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="footer">
+  <p>🌸 Waifu Guess Market • Powered By @osamu1123</p>
+</footer>
+
+<script src="{{ url_for('static', filename='js/app.js', v='auction-page-20260913') }}"></script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const choices = document.querySelectorAll('.theme-choice');
+  const allowed = ['dark', 'light', 'blue'];
+  const saved = localStorage.getItem('waifu-theme');
+  const setTheme = (theme) => {
+    const value = allowed.includes(theme) ? theme : 'dark';
+    root.dataset.theme = value;
+    localStorage.setItem('waifu-theme', value);
+    choices.forEach((button) => {
+      button.setAttribute('aria-pressed', String(button.dataset.theme === value));
+    });
+  };
+  setTheme(saved || 'dark');
+  choices.forEach((button) => button.addEventListener('click', () => setTheme(button.dataset.theme)));
+})();
+</script>
+<script>
+(() => {
+  const brand = document.getElementById('brandName');
+  if (!brand) return;
+  const animations = [
+    'brand-anim-shimmer', 'brand-anim-pulse', 'brand-anim-float',
+    'brand-anim-bounce', 'brand-anim-sway', 'brand-anim-glow',
+    'brand-anim-rainbow', 'brand-anim-wobble', 'brand-anim-heartbeat',
+    'brand-anim-electric'
+  ];
+  const configured = {{ (config.BRAND_ANIMATION or 'random') | tojson }};
+  const chosen = configured === 'random' || !animations.includes(configured)
+    ? animations[Math.floor(Math.random() * animations.length)]
+    : configured;
+  brand.classList.add(chosen);
+})();
+</script>
+{% if ad_banner_url and request.endpoint == 'market' %}
+<script>
+(() => {
+  const banner = document.getElementById('adBanner');
+  const close = document.getElementById('adBannerClose');
+  if (!banner || !close) return;
+  const storageKey = 'waifu-market-ad-closed';
+  const hide = () => {
+    banner.classList.add('is-closed');
+    try { sessionStorage.setItem(storageKey, '1'); } catch (_) {}
+  };
+  try {
+    if (sessionStorage.getItem(storageKey) === '1') banner.classList.add('is-closed');
+  } catch (_) {}
+  close.addEventListener('click', hide);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') hide();
+  });
+})();
+</script>
+{% endif %}
+{% if user %}
+<script>
+(() => {
+  const heartbeat = () => fetch('{{ url_for("capacity_status") }}', {
+    cache: 'no-store', credentials: 'same-origin'
+  }).catch(() => {});
+  heartbeat();
+  const timer = window.setInterval(heartbeat, 20000);
+  window.addEventListener('pagehide', () => {
+    window.clearInterval(timer);
+    try { navigator.sendBeacon('{{ url_for("capacity_release") }}', 'release=1'); } catch (_) {}
+  });
+})();
+</script>
+{% endif %}
+{% block scripts %}{% endblock %}
+</body>
+</html>

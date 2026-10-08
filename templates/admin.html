@@ -1,0 +1,849 @@
+{% extends "base.html" %}
+{% block title %}Admin — Waifu Market{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <a href="{{ url_for('index') }}" class="btn btn-ghost btn-sm" style="position:absolute;right:0;top:-10px;z-index:2;">‹ Back</a>
+  <h1 class="page-title">⚙️ Admin Panel</h1>
+  <p class="page-subtitle">Owner controls — organized by category</p>
+</div>
+
+<nav class="admin-tabs" aria-label="Admin sections" style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 20px;padding:8px;border:1px solid var(--border);border-radius:16px;background:var(--bg2);position:sticky;top:8px;z-index:5;backdrop-filter:blur(12px);">
+  <button class="admin-tab is-active" data-admin-tab="overview" type="button">📊 Overview</button>
+  <button class="admin-tab" data-admin-tab="appearance" type="button">🎨 Appearance</button>
+  <button class="admin-tab" data-admin-tab="market" type="button">🏪 Market</button>
+  <button class="admin-tab" data-admin-tab="games" type="button">🎮 Games & Rewards</button>
+  <button class="admin-tab" data-admin-tab="system" type="button">🔧 System</button>
+</nav>
+
+<style>
+  .admin-tab { border:1px solid transparent; border-radius:11px; padding:10px 13px; color:var(--text2); background:transparent; cursor:pointer; font:inherit; font-size:.84rem; font-weight:700; transition:.18s ease; }
+  .admin-tab:hover { color:var(--text); background:var(--card-hover); }
+  .admin-tab.is-active { color:#fff; border-color:rgba(120,160,255,.55); background:linear-gradient(135deg,#475bea,#9d4edd); box-shadow:0 6px 18px rgba(90,80,220,.25); }
+  .admin-section-hidden { display:none !important; }
+  @media (max-width:560px) { .admin-tabs { top:4px !important; } .admin-tab { flex:1 1 42%; padding:9px 7px; font-size:.76rem; } }
+</style>
+
+<!-- All listings -->
+<section class="section">
+  <h2 class="section-title">🏪 Top 10 Active Listings</h2>
+  {% if listings %}
+  <div class="listing-table-wrap">
+    <table class="listing-table">
+      <thead>
+        <tr>
+          <th>Character</th><th>Rarity</th><th>Seller</th>
+          <th>Price</th><th>Listed</th><th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="adminListingsBody">
+        {% for lst in listings %}
+        <tr id="admin-row-{{ lst._id_str }}">
+          <td class="td-char">
+            {% if lst.char_video %}
+            <video src="{{ lst.char_video }}" class="table-char-img char-video"
+                   controls preload="none"
+                   {% if lst.char_img %}poster="{{ lst.char_img }}"{% endif %}></video>
+            {% else %}
+            <img src="{{ lst.char_img }}" alt="" class="table-char-img"
+                 onerror="this.onerror=null;this.src='/static/img/no_image.png';this.classList.add('img-ready');">
+            {% endif %}
+            <span>{{ lst.char.name }}</span>
+          </td>
+          <td>{{ lst.char.rarity }}</td>
+          <td>{{ lst.seller_name }}</td>
+          <td class="price-cell">{{ lst.price_str }}</td>
+          <td>{{ lst.ago }}</td>
+          <td>
+            <button class="btn btn-danger btn-xs admin-delist-btn" data-lid="{{ lst._id_str }}">
+              🗑️ Delist
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state small"><div class="empty-desc">No active listings</div></div>
+  {% endif %}
+</section>
+
+<!-- Logo -->
+<section class="section">
+  <h2 class="section-title">🖼️ Site Logo</h2>
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+    <div id="logo-preview-wrap">
+      {% if site_logo_url %}
+        <img src="{{ site_logo_url }}" id="logo-preview" style="width:64px;height:64px;border-radius:10px;object-fit:cover;border:1px solid var(--border);">
+      {% else %}
+        <div id="logo-preview" style="width:64px;height:64px;border-radius:10px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:2rem;">🌸</div>
+      {% endif %}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <label class="btn btn-primary btn-sm" style="cursor:pointer;display:inline-block;">
+        📤 Upload Logo
+        <input type="file" id="logoFileInput" accept="image/*" style="display:none;">
+      </label>
+      {% if site_logo_url %}
+      <button class="btn btn-danger btn-sm" id="logoDeleteBtn">🗑️ Remove</button>
+      {% endif %}
+    </div>
+    <span id="logoMsg" style="font-size:.85rem;color:var(--success);display:none;"></span>
+  </div>
+</section>
+
+<!-- Welcome carousel images -->
+<section class="section">
+  <h2 class="section-title">👋 Welcome Images</h2>
+  <p style="color:var(--text3);font-size:.85rem;margin-bottom:14px;">Upload one or more welcome images. They are automatically resized and compressed to keep storage small, then shown in order with a 2-second side-slide transition.</p>
+  <div class="welcome-admin-upload">
+    <input class="form-input" id="welcomeFileInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple>
+    <button class="btn btn-primary" id="uploadWelcomeBtn" type="button">📤 Upload Welcome Images</button>
+    <span id="welcomeUploadMsg" style="font-size:.82rem;color:var(--success);display:none;"></span>
+  </div>
+  <div class="welcome-admin-grid" id="welcomeAdminGrid">
+    {% for slide in welcome_slides %}
+    <div class="welcome-admin-card" data-index="{{ loop.index0 }}">
+      <img src="{{ url_for('welcome_media', index=loop.index0) }}" alt="Welcome {{ loop.index }}">
+      <button class="btn btn-danger btn-xs welcome-delete-btn" type="button" data-index="{{ loop.index0 }}">🗑️ Delete</button>
+    </div>
+    {% else %}<div class="empty-state small" id="welcomeEmpty"><div class="empty-desc">No welcome images yet.</div></div>{% endfor %}
+  </div>
+</section>
+
+<!-- Ad Banner -->
+<section class="section">
+  <h2 class="section-title">📣 Market Mini Banner Ad</h2>
+  <p style="color:var(--text3);font-size:.85rem;margin-bottom:18px;">
+    Image သို့မဟုတ် video URL ထည့်ပါ။ Market ထဲဝင်တဲ့အခါ ညာဘက်အောက်ထောင့်မှာ mini banner အနေနဲ့ ပေါ်လာပြီး `×` နဲ့ ဖျောက်နိုင်ပါမယ်။ Banner ကိုနှိပ်ရင် အောက်က link သို့ သွားပါမယ်။
+  </p>
+  <div class="ad-upload-row" style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:18px;padding:12px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;">
+    <div class="form-group" style="margin-bottom:0;flex:1;min-width:220px;">
+      <label class="form-label">Upload Image / Video Directly</label>
+      <input class="form-input" id="adBannerFileInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,video/quicktime,video/ogg">
+      <div class="form-hint" style="color:var(--text3);font-size:.78rem;margin-top:4px;">Maximum 25 MB. Upload လုပ်ပြီးရင် URL မလိုတော့ပါ။</div>
+    </div>
+    <button class="btn btn-primary" id="uploadAdBannerBtn" type="button">📤 Upload File</button>
+    {% if config.AD_BANNER_URL %}<button class="btn btn-danger" id="deleteAdBannerBtn" type="button">🗑️ Remove Ad</button>{% endif %}
+    <span id="adUploadMsg" style="font-size:.82rem;color:var(--success);display:none;"></span>
+  </div>
+  <div class="settings-grid" id="adBannerForm">
+    <div class="form-group">
+      <label class="form-label">Image / Video URL</label>
+      <input class="form-input" id="cfg-AD_BANNER_URL" type="url"
+             placeholder="https://example.com/ad.jpg or ad.mp4"
+             value="{{ config.AD_BANNER_URL }}">
+      <div class="form-hint" style="color:var(--text3);font-size:.78rem;margin-top:4px;">
+        `.jpg`, `.png`, `.gif`, `.webp`, `.mp4`, `.webm` စသည့် direct media link သုံးပါ။
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Click Link</label>
+      <input class="form-input" id="cfg-AD_BANNER_LINK" type="url"
+             placeholder="https://t.me/yourchannel"
+             value="{{ config.AD_BANNER_LINK }}">
+      <div class="form-hint" style="color:var(--text3);font-size:.78rem;margin-top:4px;">
+        Banner နှိပ်သောအခါ ဖွင့်မည့် link ဖြစ်ပါသည်။
+      </div>
+    </div>
+  </div>
+  <button class="btn btn-primary" id="saveAdBannerBtn" style="margin-top:8px;">💾 Save Market Ad</button>
+  <span id="saveAdBannerMsg" style="margin-left:12px;font-size:.85rem;color:var(--success);display:none;">✅ Saved!</span>
+</section>
+
+<!-- Brand Animation -->
+<section class="section">
+  <h2 class="section-title">✨ Waifu Market Animation</h2>
+  <p style="color:var(--text3);font-size:.85rem;margin-bottom:18px;">
+    အပေါ်က Waifu Market စာသားအတွက် animation ကို ရွေးပါ။ Random ထားရင် page ဖွင့်တိုင်း ၁၀ မျိုးထဲက တစ်မျိုးပြောင်းပါမယ်။
+  </p>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <select class="form-input" id="brandAnimationSelect" style="max-width:280px;">
+      <option value="random" {% if config.BRAND_ANIMATION == 'random' %}selected{% endif %}>🎲 Random (10 styles)</option>
+      <option value="brand-anim-shimmer" {% if config.BRAND_ANIMATION == 'brand-anim-shimmer' %}selected{% endif %}>🌈 Shimmer</option>
+      <option value="brand-anim-pulse" {% if config.BRAND_ANIMATION == 'brand-anim-pulse' %}selected{% endif %}>💓 Pulse</option>
+      <option value="brand-anim-float" {% if config.BRAND_ANIMATION == 'brand-anim-float' %}selected{% endif %}>☁️ Float</option>
+      <option value="brand-anim-bounce" {% if config.BRAND_ANIMATION == 'brand-anim-bounce' %}selected{% endif %}>⬆️ Bounce</option>
+      <option value="brand-anim-sway" {% if config.BRAND_ANIMATION == 'brand-anim-sway' %}selected{% endif %}>↔️ Sway</option>
+      <option value="brand-anim-glow" {% if config.BRAND_ANIMATION == 'brand-anim-glow' %}selected{% endif %}>✨ Glow</option>
+      <option value="brand-anim-rainbow" {% if config.BRAND_ANIMATION == 'brand-anim-rainbow' %}selected{% endif %}>🌈 Rainbow</option>
+      <option value="brand-anim-wobble" {% if config.BRAND_ANIMATION == 'brand-anim-wobble' %}selected{% endif %}>〰️ Wobble</option>
+      <option value="brand-anim-heartbeat" {% if config.BRAND_ANIMATION == 'brand-anim-heartbeat' %}selected{% endif %}>💗 Heartbeat</option>
+      <option value="brand-anim-electric" {% if config.BRAND_ANIMATION == 'brand-anim-electric' %}selected{% endif %}>⚡ Electric</option>
+    </select>
+    <button class="btn btn-primary" id="saveBrandAnimationBtn" type="button">💾 Save Animation</button>
+    <span id="saveBrandAnimationMsg" style="font-size:.85rem;color:var(--success);display:none;">✅ Saved!</span>
+  </div>
+</section>
+
+<!-- Lucky pool -->
+<section class="section">
+  <h2 class="section-title">🍯 Lucky Buy Pool</h2>
+  <p style="color:var(--text3);font-size:.85rem;margin-bottom:14px;">
+    User တွေ Lucky Buy ကံစမ်းတိုင်း ထည့်သော internal coins များကို ဒီစုဗူးထဲမှာ မှတ်ထားပါသည်။ အနိုင်ရသော card payout ကို Owner Wallet မဟုတ်ဘဲ ဒီစုဗူးထဲကသာ ပေးပါမည်။
+  </p>
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <div style="padding:14px 18px;border:1px solid rgba(255,230,109,.35);border-radius:12px;background:rgba(255,230,109,.08);">
+      <span style="color:var(--text3);font-size:.82rem;">Current pool</span><br>
+      <strong style="color:#ffe66d;font-size:1.35rem;">{{ lucky_pool_balance }}</strong>
+    </div>
+    <span style="color:var(--text3);font-size:.82rem;">Pool မလုံလောက်သေးသော card များမှာ win မပေးဘဲ stake ကို pool ထဲ ဆက်စုပါမည်။</span>
+  </div>
+</section>
+
+<!-- Settings -->
+<section class="section">
+  <h2 class="section-title">🔧 Connection Settings</h2>
+  <p style="color:var(--text3);font-size:.85rem;margin-bottom:18px;">
+    Update Bot API URL/Key and other non-sensitive settings.
+    To change MONGO_URI or BOT_TOKEN visit <a href="{{ url_for('setup') }}">Setup page</a>.
+  </p>
+  <div class="settings-grid" id="settingsForm">
+    <div class="form-group">
+      <label class="form-label">Bot API URL</label>
+      <input class="form-input" id="cfg-BOT_API_URL" type="url"
+             placeholder="https://your-bot.onrender.com"
+             value="{{ config.BOT_API_URL }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Bot API Key</label>
+      <input class="form-input" id="cfg-BOT_API_KEY" type="password"
+             placeholder="leave blank to keep existing"
+             autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Bot Username</label>
+      <input class="form-input" id="cfg-BOT_USERNAME" type="text"
+             placeholder="MyWaifuBot" value="{{ config.BOT_USERNAME }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Market URL</label>
+      <input class="form-input" id="cfg-MARKET_URL" type="url"
+             placeholder="https://your-web.onrender.com"
+             value="{{ config.MARKET_URL }}">
+      <div class="form-hint" style="color:var(--text3);font-size:.78rem;margin-top:4px;">
+        Paste this web app's URL so the bot's /market button links here.
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Owner ID</label>
+      <input class="form-input" id="cfg-OWNER_ID" type="text"
+             placeholder="123456789" value="{{ config.OWNER_ID }}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">DB Name</label>
+      <input class="form-input" id="cfg-DB_NAME" type="text"
+             placeholder="waifu_bot" value="{{ config.DB_NAME }}">
+    </div>
+  </div>
+  <button class="btn btn-primary" id="saveSettingsBtn" style="margin-top:8px;">
+    💾 Save Settings
+  </button>
+  <span id="saveSettingsMsg" style="margin-left:12px;font-size:.85rem;color:var(--success);display:none;">✅ Saved!</span>
+</section>
+
+<!-- ── Maintenance Mode ─────────────────────────────────────────────────────── -->
+<section class="section">
+  <h2 class="section-title">🛠 Website Maintenance Mode</h2>
+  <div class="wheel-toggle-row">
+    <div>
+      <div style="font-weight:600;color:var(--text);font-size:.9rem;">Maintenance Mode</div>
+      <div style="font-size:.8rem;color:var(--text3);margin-top:2px;">ON ပြုလုပ်ထားလျှင် owner မဟုတ်သော user များကို maintenance စာမျက်နှာပြပါမည်။ Owner သည် admin panel ကို ဆက်လက်အသုံးပြုနိုင်ပါသည်။</div>
+    </div>
+    <label class="wh-toggle-label">
+      <input type="checkbox" id="maintenanceModeToggle" class="wh-toggle-cb" {% if maintenance_mode %}checked{% endif %}>
+      <span class="wh-toggle-track"></span>
+      <span class="wh-toggle-text" id="maintenanceModeText">{% if maintenance_mode %}ON{% else %}OFF{% endif %}</span>
+    </label>
+  </div>
+  <div id="maintenanceModeMsg" style="margin-top:10px;font-size:.82rem;color:var(--text3);"></div>
+</section>
+
+<!-- ── Rocket Game ─────────────────────────────────────────────────────────── -->
+<section class="section">
+  <h2 class="section-title">🚀 Rocket Game</h2>
+  <div class="wheel-toggle-row">
+    <div><div style="font-weight:600;color:var(--text);font-size:.9rem;">Rocket visibility</div><div style="font-size:.8rem;color:var(--text3);margin-top:2px;">OFF hides the card and blocks the page/API.</div></div>
+    <label class="wh-toggle-label"><input type="checkbox" id="rocketShowToggle" class="wh-toggle-cb" {% if rocket_show %}checked{% endif %}><span class="wh-toggle-track"></span><span id="rocketShowText" class="wh-toggle-text">{% if rocket_show %}Visible{% else %}Hidden{% endif %}</span></label>
+  </div>
+  <div style="margin-top:12px;color:var(--text3);font-size:.82rem;">Rocket pool: <strong style="color:#55dfff">{{ rocket_pool_balance }}</strong></div>
+</section>
+
+<!-- ── Spin Wheel ──────────────────────────────────────────────────────────── -->
+<section class="section">
+  <h2 class="section-title">🎡 Spin Wheel</h2>
+
+  <!-- Show/Hide toggle -->
+  <div class="wheel-toggle-row">
+    <div>
+      <div style="font-weight:600;color:var(--text);font-size:.9rem;">Wheel button visibility</div>
+      <div style="font-size:.8rem;color:var(--text3);margin-top:2px;">Show or hide the Wheel button on the market page</div>
+    </div>
+    <label class="wh-toggle-label">
+      <input type="checkbox" id="wheelShowToggle" class="wh-toggle-cb" {% if wheel_show %}checked{% endif %}>
+      <span class="wh-toggle-track"></span>
+      <span class="wh-toggle-text" id="wheelShowText">{% if wheel_show %}Visible{% else %}Hidden{% endif %}</span>
+    </label>
+  </div>
+
+  <!-- Prize list -->
+  <div style="margin-bottom:10px;font-size:.85rem;color:var(--text2);font-weight:600;">Prize List
+    <span style="font-size:.75rem;font-weight:400;color:var(--text3);margin-left:6px;">% = chance weight (e.g. 50+30+20 = 100)</span>
+  </div>
+  <div class="listing-table-wrap" style="margin-bottom:16px;">
+    <table class="listing-table" id="adminPrizesTable">
+      <thead><tr><th>Type</th><th>Value</th><th>Label</th><th>%</th><th></th></tr></thead>
+      <tbody id="adminPrizesBody">
+        {% for p in wheel_prizes %}
+        <tr data-pid="{{ p.id }}">
+          <td><span class="prize-type-badge prize-type-{{ p.type }}">{{ p.type }}</span></td>
+          <td style="font-size:.82rem;color:var(--text2);">{{ p.value }}</td>
+          <td style="font-weight:600;">{{ p.label }}</td>
+          <td style="color:var(--purple);font-weight:600;">{{ p.percent }}%</td>
+          <td><button class="btn btn-danger btn-xs del-prize-btn" data-pid="{{ p.id }}">🗑</button></td>
+        </tr>
+        {% else %}
+        <tr id="no-prizes-row"><td colspan="5" style="text-align:center;color:var(--text3);font-size:.85rem;">No prizes yet</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Add prize form -->
+  <div class="wheel-add-prize-form" id="addPrizeForm">
+    <div class="form-group" style="margin-bottom:0;">
+      <label class="form-label" style="font-size:.8rem;">Type</label>
+      <select class="form-input" id="newPrizeType" style="height:36px;font-size:.85rem;" onchange="onPrizeTypeChange()">
+        <option value="coins">💰 Money ($)</option>
+        <option value="char">🎭 Character ID</option>
+        <option value="thanks">🙏 Thank You</option>
+      </select>
+    </div>
+    <div class="form-group" style="margin-bottom:0;">
+      <label class="form-label" id="newPrizeValueLabel" style="font-size:.8rem;">Amount ($)</label>
+      <input class="form-input" id="newPrizeValue" type="text" placeholder="0.10" style="height:36px;font-size:.85rem;">
+    </div>
+    <div class="form-group" style="margin-bottom:0;">
+      <label class="form-label" style="font-size:.8rem;">Label</label>
+      <input class="form-input" id="newPrizeLabel" type="text" placeholder="$0.10" style="height:36px;font-size:.85rem;">
+    </div>
+    <div class="form-group" style="margin-bottom:0;">
+      <label class="form-label" style="font-size:.8rem;">% Chance</label>
+      <input class="form-input" id="newPrizePct" type="number" min="1" max="100" value="10" style="height:36px;font-size:.85rem;width:80px;">
+    </div>
+    <button class="btn btn-primary btn-sm" id="addPrizeBtn" style="align-self:flex-end;height:36px;">+ Add</button>
+  </div>
+
+  <div style="display:flex;gap:10px;align-items:center;margin-top:14px;">
+    <button class="btn btn-primary" id="savePrizesBtn">💾 Save All Prizes</button>
+    <span id="savePrizesMsg" style="font-size:.85rem;color:var(--success);display:none;">✅ Saved!</span>
+  </div>
+</section>
+
+<!-- ── Card Update ───────────────────────────────────────────────────────────── -->
+<section class="section">
+  <h2 class="section-title">🃏 Card Update</h2>
+  <div class="wheel-toggle-row">
+    <div>
+      <div style="font-weight:600;color:var(--text);font-size:.9rem;">Card Update button visibility</div>
+      <div style="font-size:.8rem;color:var(--text3);margin-top:2px;">Show or hide the Card Update button on Market. Source cards must be Legend or higher; success chance changes by target rarity and a loss removes the source card.</div>
+    </div>
+    <label class="wh-toggle-label">
+      <input type="checkbox" id="cardUpdateShowToggle" class="wh-toggle-cb" {% if card_update_show %}checked{% endif %}>
+      <span class="wh-toggle-track"></span>
+      <span class="wh-toggle-text" id="cardUpdateShowText">{% if card_update_show %}Visible{% else %}Hidden{% endif %}</span>
+    </label>
+  </div>
+</section>
+
+<!-- ── Daily Rare Rarity Controls ───────────────────────────────────────────── -->
+<section class="section">
+  <h2 class="section-title">📅 Daily Rare Rarity Controls</h2>
+  <p style="color:var(--text3);font-size:.82rem;margin-bottom:14px;">
+    Set today’s limit for each rare rarity. <strong>0 = locked</strong> (cannot spawn), <strong>1–998 = daily cap</strong>, and <strong>999 = unlimited</strong> so the normal rarity percentage is used. Used counts reset to 0 automatically when the date changes. Current day: <strong>{{ daily_quota_date }}</strong>
+  </p>
+  <div class="daily-rarity-grid" id="dailyRarityGrid">
+    {% for row in daily_rarity_rows %}
+    <div class="daily-rarity-item">
+      <label class="form-label" for="daily-rarity-{{ loop.index }}">{{ row.key }}</label>
+      <div class="daily-rarity-input-row">
+        <input class="form-input daily-rarity-input" id="daily-rarity-{{ loop.index }}" data-rarity-key="{{ row.key }}" type="number" min="0" max="999" step="1" value="{{ row.limit }}">
+        <span class="daily-rarity-used">Used <strong>{{ row.used }}</strong></span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap;">
+    <button class="btn btn-primary" id="saveDailyRarityBtn" type="button">💾 Save Daily Limits</button>
+    <span id="saveDailyRarityMsg" style="font-size:.85rem;color:var(--success);display:none;">✅ Saved!</span>
+  </div>
+</section>
+
+<!-- ── Secret Codes ─────────────────────────────────────────────────────────── -->
+<section class="section">
+  <h2 class="section-title">🔑 Secret Codes</h2>
+  <p style="color:var(--text3);font-size:.82rem;margin-bottom:14px;">
+    Users enter these codes in the Wheel modal to spin. Set limit to 0 for unlimited uses.
+  </p>
+  <div class="listing-table-wrap" style="margin-bottom:16px;">
+    <table class="listing-table" id="adminCodesTable">
+      <thead><tr><th>Code</th><th>Limit</th><th>Uses</th><th>Created</th><th></th></tr></thead>
+      <tbody id="adminCodesBody">
+        {% for c in wheel_codes %}
+        <tr id="code-row-{{ c.id }}">
+          <td style="font-family:monospace;font-weight:700;font-size:.9rem;letter-spacing:1px;">{{ c.code }}</td>
+          <td>{% if c.limit == 0 %}∞{% else %}{{ c.limit }}{% endif %}</td>
+          <td style="color:var(--text2);">{{ c.uses }}</td>
+          <td style="font-size:.78rem;color:var(--text3);">{{ c.created_at|int|string }}</td>
+          <td><button class="btn btn-danger btn-xs del-code-btn" data-cid="{{ c.id }}">🗑</button></td>
+        </tr>
+        {% else %}
+        <tr id="no-codes-row"><td colspan="5" style="text-align:center;color:var(--text3);font-size:.85rem;">No codes yet</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="wheel-add-code-form">
+    <div class="form-group" style="margin-bottom:0;flex:1;">
+      <label class="form-label" style="font-size:.8rem;">Code Text</label>
+      <input class="form-input" id="newCodeText" type="text" placeholder="KITE" maxlength="32"
+             style="height:36px;font-size:.85rem;text-transform:uppercase;letter-spacing:2px;" autocomplete="off">
+    </div>
+    <div class="form-group" style="margin-bottom:0;">
+      <label class="form-label" style="font-size:.8rem;">Limit (0=∞)</label>
+      <input class="form-input" id="newCodeLimit" type="number" min="0" value="0"
+             style="height:36px;font-size:.85rem;width:90px;">
+    </div>
+    <button class="btn btn-primary btn-sm" id="addCodeBtn" style="align-self:flex-end;height:36px;">+ Add Code</button>
+    <span id="addCodeMsg" style="font-size:.82rem;align-self:flex-end;padding-bottom:2px;display:none;"></span>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ── Admin section navigation ── */
+(() => {
+  const groups = {
+    overview: ['Top 10 Active Listings'],
+    appearance: ['Site Logo', 'Welcome Images', 'Market Mini Banner Ad', 'Waifu Market Animation'],
+    market: ['Lucky Buy Pool'],
+    games: ['Rocket Game', 'Spin Wheel', 'Card Update', 'Daily Rare Rarity Controls', 'Secret Codes'],
+    system: ['Connection Settings', 'Website Maintenance Mode']
+  };
+  const sections = [...document.querySelectorAll('section.section')];
+  const tabs = [...document.querySelectorAll('.admin-tab')];
+  const titleOf = section => section.querySelector('.section-title')?.textContent.trim() || '';
+  const groupOf = title => Object.entries(groups).find(([, names]) => names.some(name => title.includes(name)))?.[0] || 'system';
+  const show = group => {
+    sections.forEach(section => section.classList.toggle('admin-section-hidden', groupOf(titleOf(section)) !== group));
+    tabs.forEach(tab => tab.classList.toggle('is-active', tab.dataset.adminTab === group));
+    history.replaceState(null, '', `#admin-${group}`);
+  };
+  tabs.forEach(tab => tab.addEventListener('click', () => show(tab.dataset.adminTab)));
+  const requested = location.hash.replace('#admin-', '');
+  show(groups[requested] ? requested : 'overview');
+})();
+/* ── Admin delist ── */
+document.querySelectorAll('.admin-delist-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const lid = btn.dataset.lid;
+    if (!confirm('Delist this listing? Character returns to seller.')) return;
+    btn.disabled = true; btn.textContent = '…';
+    const res  = await fetch(`/api/admin/delist/${lid}`, { method: 'POST',
+      headers: {'Content-Type':'application/json'} });
+    const data = await res.json();
+    if (data.ok) {
+      showToast('✅ Delisted — character returned to seller.', 'success');
+      document.getElementById(`admin-row-${lid}`)?.remove();
+    } else {
+      showToast(`❌ ${data.error}`, 'error');
+      btn.disabled = false; btn.textContent = '🗑️ Delist';
+    }
+  });
+});
+
+
+/* ── Save settings ── */
+document.getElementById('saveBrandAnimationBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('saveBrandAnimationBtn');
+  const msg = document.getElementById('saveBrandAnimationMsg');
+  btn.disabled = true; btn.textContent = '…';
+  const res = await apiPost('/api/admin/settings', {
+    BRAND_ANIMATION: document.getElementById('brandAnimationSelect').value
+  });
+  btn.disabled = false; btn.textContent = '💾 Save Animation';
+  if (res.ok) {
+    msg.style.display = 'inline';
+    setTimeout(() => msg.style.display = 'none', 2500);
+    showToast('✅ Brand animation saved!', 'success');
+  } else {
+    showToast('❌ ' + (res.error || 'Unable to save animation'), 'error');
+  }
+});
+
+document.getElementById('uploadAdBannerBtn')?.addEventListener('click', async () => {
+  const input = document.getElementById('adBannerFileInput');
+  const btn = document.getElementById('uploadAdBannerBtn');
+  const msg = document.getElementById('adUploadMsg');
+  const file = input.files[0];
+  if (!file) { showToast('⚠️ Please choose an image or video file first', 'error'); return; }
+  btn.disabled = true; btn.textContent = '⏳ Uploading…';
+  const form = new FormData();
+  form.append('ad_banner', file);
+  try {
+    const response = await fetch('/admin/ad-banner', { method: 'POST', body: form });
+    const res = await response.json();
+    if (res.ok) {
+      document.getElementById('cfg-AD_BANNER_URL').value = res.url;
+      msg.textContent = '✅ Uploaded'; msg.style.display = 'inline';
+      showToast('✅ Ad file uploaded!', 'success');
+      setTimeout(() => location.reload(), 700);
+    } else {
+      showToast('❌ ' + (res.error || 'Upload failed'), 'error');
+    }
+  } catch (error) {
+    showToast('❌ Upload failed. Please try again.', 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = '📤 Upload File';
+    input.value = '';
+  }
+});
+
+document.getElementById('deleteAdBannerBtn')?.addEventListener('click', async () => {
+  if (!confirm('Remove the popup ad?')) return;
+  const btn = document.getElementById('deleteAdBannerBtn');
+  btn.disabled = true; btn.textContent = '…';
+  const res = await apiPost('/admin/ad-banner/delete');
+  if (res.ok) {
+    showToast('✅ Popup ad removed.', 'success');
+    setTimeout(() => location.reload(), 500);
+  } else {
+    btn.disabled = false; btn.textContent = '🗑️ Remove Ad';
+    showToast('❌ ' + (res.error || 'Unable to remove ad'), 'error');
+  }
+});
+
+document.getElementById('saveAdBannerBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('saveAdBannerBtn');
+  const msg = document.getElementById('saveAdBannerMsg');
+  btn.disabled = true; btn.textContent = '…';
+  const res = await apiPost('/api/admin/settings', {
+    AD_BANNER_URL: document.getElementById('cfg-AD_BANNER_URL').value.trim(),
+    AD_BANNER_LINK: document.getElementById('cfg-AD_BANNER_LINK').value.trim()
+  });
+  btn.disabled = false; btn.textContent = '💾 Save Ad Banner';
+  if (res.ok) {
+    msg.style.display = 'inline';
+    setTimeout(() => msg.style.display = 'none', 2500);
+    showToast('✅ Ad banner saved!', 'success');
+  } else {
+    showToast('❌ ' + (res.error || 'Unable to save ad banner'), 'error');
+  }
+});
+
+document.getElementById('saveSettingsBtn')?.addEventListener('click', async () => {
+  const fields = ['BOT_API_URL','BOT_API_KEY','BOT_USERNAME','MARKET_URL','OWNER_ID','DB_NAME'];
+  const payload = {};
+  fields.forEach(k => {
+    const el = document.getElementById(`cfg-${k}`);
+    if (el && el.value.trim()) payload[k] = el.value.trim();
+  });
+  const btn = document.getElementById('saveSettingsBtn');
+  btn.disabled = true; btn.textContent = '…';
+  const res  = await fetch('/api/admin/settings', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  btn.disabled = false; btn.textContent = '💾 Save Settings';
+  if (data.ok) {
+    const msg = document.getElementById('saveSettingsMsg');
+    msg.style.display = 'inline';
+    setTimeout(() => msg.style.display = 'none', 3000);
+    showToast('✅ Settings saved!', 'success');
+  } else {
+    showToast(`❌ ${data.error}`, 'error');
+  }
+});
+
+/* ── Logo upload / delete ── */
+const logoInput = document.getElementById('logoFileInput');
+if (logoInput) {
+  logoInput.addEventListener('change', async () => {
+    const file = logoInput.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('logo', file);
+    const msg = document.getElementById('logoMsg');
+    msg.textContent = 'Uploading…'; msg.style.display = 'inline'; msg.style.color = 'var(--text2)';
+    const res  = await fetch('/admin/logo', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.ok) {
+      msg.textContent = '✅ Saved!'; msg.style.color = 'var(--success)';
+      const preview = document.getElementById('logo-preview');
+      const img = document.createElement('img');
+      img.id = 'logo-preview';
+      img.style = 'width:64px;height:64px;border-radius:10px;object-fit:cover;border:1px solid var(--border);';
+      img.src = data.url + '?t=' + Date.now();
+      preview.replaceWith(img);
+      setTimeout(() => msg.style.display = 'none', 2500);
+    } else {
+      msg.textContent = '❌ ' + data.error; msg.style.color = 'var(--error)';
+    }
+    logoInput.value = '';
+  });
+}
+
+const logoDeleteBtn = document.getElementById('logoDeleteBtn');
+if (logoDeleteBtn) {
+  logoDeleteBtn.addEventListener('click', async () => {
+    if (!confirm('Remove site logo?')) return;
+    const res  = await fetch('/admin/logo/delete', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      showToast('✅ Logo removed.', 'success');
+      const preview = document.getElementById('logo-preview');
+      const div = document.createElement('div');
+      div.id = 'logo-preview';
+      div.style = 'width:64px;height:64px;border-radius:10px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:2rem;';
+      div.textContent = '🌸';
+      preview.replaceWith(div);
+      logoDeleteBtn.style.display = 'none';
+    } else {
+      showToast('❌ ' + data.error, 'error');
+    }
+  });
+}
+
+/* ── Welcome carousel upload / delete ── */
+document.getElementById('uploadWelcomeBtn')?.addEventListener('click', async () => {
+  const input = document.getElementById('welcomeFileInput');
+  const btn = document.getElementById('uploadWelcomeBtn');
+  const msg = document.getElementById('welcomeUploadMsg');
+  if (!input.files.length) { showToast('⚠️ Choose one or more images first.', 'error'); return; }
+  btn.disabled = true; btn.textContent = '⏳ Uploading…';
+  try {
+    for (const file of input.files) {
+      const form = new FormData(); form.append('welcome', file);
+      const response = await fetch('/admin/welcome', { method: 'POST', body: form });
+      const data = await response.json();
+      if (!data.ok) throw new Error(data.error || 'Upload failed');
+    }
+    msg.textContent = '✅ Uploaded and compressed'; msg.style.display = 'inline';
+    showToast('✅ Welcome images saved.', 'success');
+    setTimeout(() => location.reload(), 600);
+  } catch (error) { showToast('❌ ' + error.message, 'error'); }
+  finally { btn.disabled = false; btn.textContent = '📤 Upload Welcome Images'; input.value = ''; }
+});
+
+document.querySelectorAll('.welcome-delete-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const index = btn.dataset.index;
+    if (!confirm('Delete this welcome image?')) return;
+    btn.disabled = true;
+    const response = await fetch(`/admin/welcome/${index}/delete`, { method: 'POST' });
+    const data = await response.json();
+    if (data.ok) { showToast('✅ Welcome image deleted.', 'success'); location.reload(); }
+    else { btn.disabled = false; showToast('❌ ' + (data.error || 'Delete failed'), 'error'); }
+  });
+});
+
+/* ── Wheel admin ── */
+function _escAdm(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+let _adminPrizes = {{ wheel_prizes | tojson }};
+
+function renderAdminPrizes() {
+  const tbody = document.getElementById('adminPrizesBody');
+  if (!_adminPrizes.length) {
+    tbody.innerHTML = '<tr id="no-prizes-row"><td colspan="5" style="text-align:center;color:var(--text3);font-size:.85rem;">No prizes yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _adminPrizes.map((p, idx) => `
+    <tr>
+      <td><span class="prize-type-badge prize-type-${p.type}">${p.type}</span></td>
+      <td style="font-size:.82rem;color:var(--text2);">${_escAdm(String(p.value||''))}</td>
+      <td style="font-weight:600;">${_escAdm(p.label||'')}</td>
+      <td style="color:var(--purple);font-weight:600;">${p.percent||0}%</td>
+      <td><button class="btn btn-danger btn-xs" onclick="deletePrize(${idx})">🗑</button></td>
+    </tr>`).join('');
+}
+
+function deletePrize(idx) {
+  _adminPrizes.splice(idx, 1);
+  renderAdminPrizes();
+}
+
+function onPrizeTypeChange() {
+  const type  = document.getElementById('newPrizeType').value;
+  const lbl   = document.getElementById('newPrizeValueLabel');
+  const inp   = document.getElementById('newPrizeValue');
+  const labEl = document.getElementById('newPrizeLabel');
+  if (type === 'coins') {
+    lbl.textContent = 'Amount ($)'; inp.placeholder = '0.10'; inp.type = 'number';
+    labEl.placeholder = '$0.10';
+  } else if (type === 'char') {
+    lbl.textContent = 'Character ID'; inp.placeholder = '12345'; inp.type = 'text';
+    labEl.placeholder = 'ID #12345';
+  } else {
+    lbl.textContent = 'Message (optional)'; inp.placeholder = 'Thanks for playing!'; inp.type = 'text';
+    labEl.placeholder = 'Thank You!';
+  }
+}
+
+document.getElementById('addPrizeBtn')?.addEventListener('click', () => {
+  const type  = document.getElementById('newPrizeType').value;
+  const value = document.getElementById('newPrizeValue').value.trim();
+  const label = document.getElementById('newPrizeLabel').value.trim();
+  const pct   = parseFloat(document.getElementById('newPrizePct').value) || 10;
+  if (!label) { showToast('⚠️ Label is required', 'error'); return; }
+  if (type === 'coins' && !value) { showToast('⚠️ Amount is required', 'error'); return; }
+  if (type === 'char'  && !value) { showToast('⚠️ Character ID is required', 'error'); return; }
+  _adminPrizes.push({ id: 'p_' + Date.now(), type, value, label, percent: pct });
+  renderAdminPrizes();
+  document.getElementById('newPrizeValue').value = '';
+  document.getElementById('newPrizeLabel').value = '';
+  document.getElementById('newPrizePct').value = '10';
+});
+
+document.getElementById('savePrizesBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('savePrizesBtn');
+  btn.disabled = true; btn.textContent = '…';
+  const res = await apiPost('/api/admin/wheel/prizes', { prizes: _adminPrizes });
+  btn.disabled = false; btn.textContent = '💾 Save All Prizes';
+  if (res.ok) {
+    const msg = document.getElementById('savePrizesMsg');
+    msg.style.display = 'inline';
+    setTimeout(() => msg.style.display = 'none', 2500);
+    showToast('✅ Prizes saved!', 'success');
+  } else {
+    showToast('❌ ' + res.error, 'error');
+  }
+});
+
+document.getElementById('cardUpdateShowToggle')?.addEventListener('change', async (e) => {
+  const show = e.target.checked;
+  const text = document.getElementById('cardUpdateShowText');
+  const res  = await apiPost('/api/admin/card-update/show', { show });
+  if (res.ok) {
+    text.textContent = show ? 'Visible' : 'Hidden';
+    showToast(show ? '✅ Card Update button is visible on Market' : '🙈 Card Update button hidden', 'success');
+  } else {
+    e.target.checked = !show;
+    text.textContent = e.target.checked ? 'Visible' : 'Hidden';
+    showToast('❌ ' + (res.error || 'Unable to save setting'), 'error');
+  }
+});
+
+document.getElementById('saveDailyRarityBtn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('saveDailyRarityBtn');
+  const msg = document.getElementById('saveDailyRarityMsg');
+  const limits = {};
+  let invalid = false;
+  document.querySelectorAll('.daily-rarity-input').forEach(input => {
+    const value = Number(input.value);
+    if (!Number.isInteger(value) || value < 0 || value > 999) {
+      input.focus(); invalid = true;
+    }
+    limits[input.dataset.rarityKey] = value;
+  });
+  if (invalid) { showToast('⚠️ Daily limits must be whole numbers from 0 to 999', 'error'); return; }
+  btn.disabled = true; btn.textContent = '…';
+  const res = await apiPost('/api/admin/daily-rarity', { limits });
+  btn.disabled = false; btn.textContent = '💾 Save Daily Limits';
+  if (res.ok) {
+    msg.style.display = 'inline';
+    setTimeout(() => msg.style.display = 'none', 2500);
+    showToast('✅ Daily rarity limits saved!', 'success');
+  } else {
+    showToast('❌ ' + (res.error || 'Unable to save daily limits'), 'error');
+  }
+});
+
+document.getElementById('wheelShowToggle')?.addEventListener('change', async (e) => {
+  const show = e.target.checked;
+  const res  = await apiPost('/api/admin/wheel/show', { show });
+  const txt  = document.getElementById('wheelShowText');
+  if (res.ok) {
+    txt.textContent = show ? 'Visible' : 'Hidden';
+    showToast(show ? '✅ Wheel is now visible on market' : '🙈 Wheel button hidden', 'success');
+  } else {
+    e.target.checked = !show;
+    showToast('❌ ' + res.error, 'error');
+  }
+});
+
+/* ── Secret codes ── */
+document.getElementById('addCodeBtn')?.addEventListener('click', async () => {
+  const code  = (document.getElementById('newCodeText').value || '').trim().toUpperCase();
+  const limit = parseInt(document.getElementById('newCodeLimit').value) || 0;
+  if (!code) { showToast('⚠️ Code text required', 'error'); return; }
+  const btn = document.getElementById('addCodeBtn');
+  btn.disabled = true; btn.textContent = '…';
+  const res = await apiPost('/api/admin/wheel/codes', { code, limit });
+  btn.disabled = false; btn.textContent = '+ Add Code';
+  if (res.ok) {
+    document.getElementById('newCodeText').value  = '';
+    document.getElementById('newCodeLimit').value = '0';
+    const tbody = document.getElementById('adminCodesBody');
+    document.getElementById('no-codes-row')?.remove();
+    const tr = document.createElement('tr');
+    tr.id = `code-row-${res.id}`;
+    tr.innerHTML = `
+      <td style="font-family:monospace;font-weight:700;font-size:.9rem;letter-spacing:1px;">${_escAdm(res.code)}</td>
+      <td>${res.limit === 0 ? '∞' : res.limit}</td>
+      <td style="color:var(--text2);">0</td>
+      <td style="font-size:.78rem;color:var(--text3);">just now</td>
+      <td><button class="btn btn-danger btn-xs del-code-btn" data-cid="${_escAdm(res.id)}">🗑</button></td>`;
+    tbody.appendChild(tr);
+    showToast('✅ Code added!', 'success');
+  } else {
+    showToast('❌ ' + res.error, 'error');
+  }
+});
+
+async function deleteCode(cid) {
+  if (!cid || !confirm('Delete this code?')) return;
+  const res = await apiPost(`/api/admin/wheel/codes/${encodeURIComponent(cid)}/delete`);
+  if (res.ok) {
+    document.getElementById(`code-row-${cid}`)?.remove();
+    showToast('✅ Code deleted.', 'success');
+    if (!document.querySelector('#adminCodesBody tr[id^="code-row-"]')) {
+      document.getElementById('adminCodesBody').innerHTML =
+        '<tr id="no-codes-row"><td colspan="5" style="text-align:center;color:var(--text3);font-size:.85rem;">No codes yet</td></tr>';
+    }
+  } else {
+    showToast('❌ ' + (res.error || 'Unable to delete code'), 'error');
+  }
+}
+
+// Bind both server-rendered and dynamically-added Secret Code delete buttons.
+document.getElementById('adminCodesBody')?.addEventListener('click', (event) => {
+  const btn = event.target.closest('.del-code-btn');
+  if (btn) deleteCode(btn.dataset.cid);
+});
+
+document.getElementById('maintenanceModeToggle')?.addEventListener('change', async (e) => {
+  const toggle = e.target, enabled = toggle.checked, text = document.getElementById('maintenanceModeText'), msg = document.getElementById('maintenanceModeMsg');
+  toggle.disabled = true; msg.textContent = 'Saving…';
+  const res = await apiPost('/api/admin/maintenance', {enabled});
+  if (res.ok) { text.textContent = enabled ? 'ON' : 'OFF'; msg.textContent = enabled ? 'Maintenance Mode ဖွင့်ထားပါသည်။' : 'Maintenance Mode ပိတ်ထားပါသည်။'; }
+  else { toggle.checked = !enabled; text.textContent = toggle.checked ? 'ON' : 'OFF'; msg.textContent = res.error || 'Unable to save setting'; }
+  toggle.disabled = false;
+});
+
+document.getElementById('rocketShowToggle')?.addEventListener('change', async (e) => {
+  const show = e.target.checked; const res = await apiPost('/api/admin/rocket/show', {show});
+  if (res.ok) document.getElementById('rocketShowText').textContent = show ? 'Visible' : 'Hidden';
+  else { e.target.checked = !show; showToast(`❌ ${res.error || 'Could not save Rocket setting'}`, 'error'); }
+});
+
+// Initialize prize rows with JS (for delete handlers)
+renderAdminPrizes();
+</script>
+{% endblock %}

@@ -1,0 +1,377 @@
+{% extends "base.html" %}
+{% block title %}Wallet — Waifu Market{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <a href="{{ url_for('index') }}" class="btn btn-ghost btn-sm" style="position:absolute;right:0;top:-10px;z-index:2;">‹ Back</a>
+  <h1 class="page-title">💵 Wallet</h1>
+  <p class="page-subtitle">Your balance, transfers &amp; history</p>
+</div>
+
+<!-- Balance card -->
+<div class="balance-card">
+  <div class="balance-label">Current Balance</div>
+  <div class="balance-amount" id="balanceDisplay">{{ balance_str }}</div>
+  <div class="balance-note">💡 Synced with your Telegram bot balance • Wallet ID: <code style="font-size:.8rem;color:var(--purple)">{{ uid }}</code></div>
+</div>
+
+<!-- Transfer form -->
+<section class="section">
+  <h2 class="section-title">📤 Send Coins</h2>
+  <div class="card transfer-card">
+    <div class="transfer-grid">
+
+      <!-- Recipient -->
+      <div class="form-group">
+        <label class="form-label">Recipient — Wallet ID or @username</label>
+        <div class="input-with-btn">
+          <input type="text" id="transferTo" class="form-input"
+                 placeholder="e.g. 123456789 or @username"
+                 autocomplete="off">
+          <button class="btn btn-ghost btn-sm" id="lookupBtn" type="button">🔍 Lookup</button>
+        </div>
+        <!-- Preview card -->
+        <div id="recipientPreview" class="recipient-preview" style="display:none">
+          <div class="recipient-avatar" id="recipientAvatar"></div>
+          <div class="recipient-info">
+            <div class="recipient-name" id="recipientName"></div>
+            <div class="recipient-id"   id="recipientIdDisplay"></div>
+          </div>
+          <div class="recipient-check">✅</div>
+        </div>
+        <div id="recipientError" class="recipient-error" style="display:none"></div>
+      </div>
+
+      <!-- Amount -->
+      <div class="form-group">
+        <label class="form-label">Amount ($)</label>
+        <div class="amount-input-wrap">
+          <span class="amount-prefix">$</span>
+          <input type="number" id="transferAmt" class="form-input amount-input"
+                 placeholder="0.00" min="0.01" step="0.01">
+        </div>
+        <div class="quick-amounts">
+          <button class="quick-amt" data-amt="0.50">$0.50</button>
+          <button class="quick-amt" data-amt="1.00">$1.00</button>
+          <button class="quick-amt" data-amt="5.00">$5.00</button>
+          <button class="quick-amt" data-amt="10.00">$10.00</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirm row -->
+    <div class="transfer-confirm-row">
+      <div class="transfer-summary" id="transferSummary" style="display:none">
+        Sending <strong id="summaryAmt"></strong> to <strong id="summaryTo"></strong>
+      </div>
+      <button class="btn btn-primary" id="transferBtn" disabled>📤 Send</button>
+    </div>
+  </div>
+</section>
+
+<!-- Transaction history -->
+<section class="section">
+  <h2 class="section-title">
+    📋 Transaction History
+    <span class="badge-count">{{ txs | length }}</span>
+  </h2>
+  {% if txs %}
+  <div class="tx-list">
+    {% for tx in txs %}
+    <div class="tx-row tx-dir-{{ tx.direction }}">
+
+      <!-- Icon -->
+      <div class="tx-icon-wrap tx-{{ tx.direction }}">
+        {% if tx.type == 'buy' and tx.direction == 'out' %}🛒
+        {% elif tx.type == 'buy' and tx.direction == 'in' %}💰
+        {% elif tx.type == 'transfer' and tx.direction == 'out' %}📤
+        {% elif tx.type == 'transfer' and tx.direction == 'in' %}📥
+        {% elif tx.type == 'sell_list' %}🏷️
+        {% elif tx.type == 'delist' %}↩️
+        {% else %}💳
+        {% endif %}
+      </div>
+
+      <!-- Details -->
+      <div class="tx-details">
+        <div class="tx-label-row">
+          <span class="tx-label">{{ tx.label }}</span>
+        </div>
+
+        <!-- Who sent / received -->
+        {% if tx.party_name and tx.party_name != uid | string %}
+        <div class="tx-party-row">
+          <span class="tx-party-badge tx-{{ tx.direction }}">
+            {{ tx.party_label }}
+          </span>
+          <span class="tx-party-name">{{ tx.party_name }}</span>
+          {% if tx.party_id and tx.party_id != tx.party_name | string %}
+          <span class="tx-party-id">#{{ tx.party_id }}</span>
+          {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Character info -->
+        {% if tx.char_name %}
+        <div class="tx-char-row">
+          <span class="tx-char-icon">🃏</span>
+          <span class="tx-char-name">{{ tx.char_name }}</span>
+          {% if tx.char_rarity %}
+          <span class="tx-char-rarity">{{ tx.char_rarity }}</span>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Amount + time -->
+      <div class="tx-right">
+        <div class="tx-amount-badge tx-{{ tx.direction }}">
+          {% if tx.amount > 0 %}
+            {% if tx.direction == 'out' %}−{% else %}+{% endif %}{{ tx.amount_str }}
+          {% else %}
+            {{ tx.amount_str }}
+          {% endif %}
+        </div>
+        <div class="tx-time">{{ tx.ago }}</div>
+      </div>
+
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state small">
+    <div class="empty-icon">📋</div>
+    <div class="empty-title">No transactions yet</div>
+    <div class="empty-desc">Your transfer and purchase history will appear here.</div>
+  </div>
+  {% endif %}
+</section>
+
+<style>
+/* ── Wallet extras ─────────────────────────────────────────── */
+.transfer-card { padding: 24px; }
+
+.transfer-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+@media (max-width: 600px) { .transfer-grid { grid-template-columns: 1fr; } }
+
+.input-with-btn {
+  display: flex; gap: 8px;
+}
+.input-with-btn .form-input { flex: 1; }
+
+.amount-input-wrap { position: relative; }
+.amount-prefix {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  color: var(--text2); font-weight: 600; pointer-events: none;
+}
+.amount-input { padding-left: 26px !important; }
+
+.quick-amounts {
+  display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
+}
+.quick-amt {
+  padding: 4px 10px; border-radius: 99px;
+  background: var(--bg3); border: 1px solid var(--border);
+  color: var(--text2); font-size: .78rem; cursor: pointer;
+  transition: all .15s;
+}
+.quick-amt:hover { background: var(--card-hover); color: var(--purple); border-color: var(--border-hi); }
+
+.recipient-preview {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(64,224,144,.08); border: 1px solid rgba(64,224,144,.3);
+  border-radius: var(--radius-sm); padding: 10px 14px;
+  margin-top: 8px; animation: slide-up .2s ease;
+}
+.recipient-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--grad); display: flex; align-items: center;
+  justify-content: center; font-weight: 700; font-size: .9rem; color: #fff;
+  flex-shrink: 0;
+}
+.recipient-name { font-weight: 600; color: var(--text); font-size: .9rem; }
+.recipient-id   { font-size: .75rem; color: var(--text3); margin-top: 1px; }
+.recipient-check { margin-left: auto; font-size: 1.1rem; }
+.recipient-error {
+  background: rgba(255,80,112,.08); border: 1px solid rgba(255,80,112,.3);
+  border-radius: var(--radius-sm); padding: 8px 12px;
+  margin-top: 8px; font-size: .82rem; color: var(--error);
+}
+
+.transfer-confirm-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding-top: 16px; border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.transfer-summary {
+  font-size: .88rem; color: var(--text2);
+}
+.transfer-summary strong { color: var(--text); }
+
+/* ── Transaction rows ──────────────────────────────────────── */
+.tx-list { display: flex; flex-direction: column; gap: 6px; }
+
+.tx-row {
+  display: flex; align-items: flex-start; gap: 14px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px;
+  transition: background .15s, border-color .15s;
+}
+.tx-row:hover { background: var(--card-hover); border-color: var(--border-hi); }
+
+.tx-dir-in  { border-left: 3px solid var(--success); }
+.tx-dir-out { border-left: 3px solid var(--error); }
+
+.tx-icon-wrap {
+  width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.15rem;
+}
+.tx-icon-wrap.tx-in  { background: rgba(64,224,144,.12); }
+.tx-icon-wrap.tx-out { background: rgba(255,80,112,.12); }
+
+.tx-details { flex: 1; min-width: 0; }
+
+.tx-label-row { margin-bottom: 4px; }
+.tx-label { font-weight: 600; font-size: .9rem; color: var(--text); }
+
+.tx-party-row {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 3px;
+}
+.tx-party-badge {
+  font-size: .7rem; font-weight: 700; padding: 1px 7px;
+  border-radius: 99px; text-transform: uppercase; letter-spacing: .04em;
+  flex-shrink: 0;
+}
+.tx-party-badge.tx-out { background: rgba(255,80,112,.15); color: var(--error); }
+.tx-party-badge.tx-in  { background: rgba(64,224,144,.15); color: var(--success); }
+.tx-party-name { font-size: .85rem; color: var(--text); font-weight: 500;
+                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tx-party-id   { font-size: .75rem; color: var(--text3); flex-shrink: 0; }
+
+.tx-char-row { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.tx-char-icon { font-size: .8rem; }
+.tx-char-name   { font-size: .8rem; color: var(--text2); }
+.tx-char-rarity { font-size: .72rem; color: var(--text3); }
+
+.tx-right { text-align: right; flex-shrink: 0; min-width: 80px; }
+
+.tx-amount-badge {
+  font-size: .95rem; font-weight: 800; display: inline-block;
+  padding: 2px 10px; border-radius: 99px;
+}
+.tx-amount-badge.tx-in  { background: rgba(64,224,144,.12); color: var(--success); }
+.tx-amount-badge.tx-out { background: rgba(255,80,112,.12); color: var(--error); }
+
+.tx-time { font-size: .75rem; color: var(--text3); margin-top: 4px; }
+</style>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _resolvedToId   = null;
+let _resolvedToName = null;
+
+// ── User lookup ─────────────────────────────────────────────────────────────
+async function lookupUser() {
+  const val = document.getElementById('transferTo').value.trim();
+  const preview = document.getElementById('recipientPreview');
+  const errBox  = document.getElementById('recipientError');
+  preview.style.display = 'none';
+  errBox.style.display  = 'none';
+  _resolvedToId   = null;
+  _resolvedToName = null;
+  updateSendBtn();
+
+  if (!val) return;
+
+  const res = await apiGet(`/api/user-lookup?q=${encodeURIComponent(val)}`);
+  if (res.ok) {
+    _resolvedToId   = res.user_id;
+    _resolvedToName = res.display_name;
+    document.getElementById('recipientName').textContent      = res.display_name;
+    document.getElementById('recipientIdDisplay').textContent = `Wallet ID: ${res.user_id}`;
+    document.getElementById('recipientAvatar').textContent    = res.display_name[0]?.toUpperCase() || '?';
+    preview.style.display = 'flex';
+  } else {
+    errBox.textContent    = `❌ ${res.error}`;
+    errBox.style.display  = 'block';
+  }
+  updateSendBtn();
+  updateSummary();
+}
+
+document.getElementById('lookupBtn').addEventListener('click', lookupUser);
+document.getElementById('transferTo').addEventListener('keydown', e => {
+  if (e.key === 'Enter') lookupUser();
+});
+// Auto-lookup when input loses focus
+document.getElementById('transferTo').addEventListener('blur', () => {
+  if (document.getElementById('transferTo').value.trim()) lookupUser();
+});
+
+// ── Quick amounts ────────────────────────────────────────────────────────────
+document.querySelectorAll('.quick-amt').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.getElementById('transferAmt').value = btn.dataset.amt;
+    updateSendBtn();
+    updateSummary();
+  });
+});
+document.getElementById('transferAmt').addEventListener('input', () => {
+  updateSendBtn();
+  updateSummary();
+});
+
+function updateSendBtn() {
+  const amt = parseFloat(document.getElementById('transferAmt').value);
+  const ok  = _resolvedToId && amt >= 0.01;
+  document.getElementById('transferBtn').disabled = !ok;
+}
+
+function updateSummary() {
+  const summary = document.getElementById('transferSummary');
+  const amt = parseFloat(document.getElementById('transferAmt').value);
+  if (_resolvedToId && amt >= 0.01) {
+    document.getElementById('summaryAmt').textContent = `$${amt.toFixed(2)}`;
+    document.getElementById('summaryTo').textContent  = _resolvedToName || _resolvedToId;
+    summary.style.display = 'block';
+  } else {
+    summary.style.display = 'none';
+  }
+}
+
+// ── Send ─────────────────────────────────────────────────────────────────────
+document.getElementById('transferBtn').addEventListener('click', async () => {
+  const amt = parseFloat(document.getElementById('transferAmt').value);
+  if (!_resolvedToId || !amt || amt < 0.01) return;
+  const btn = document.getElementById('transferBtn');
+  btn.disabled = true; btn.textContent = 'Sending…';
+
+  const res = await apiPost('/api/transfer', {
+    to:     String(_resolvedToId),
+    amount: amt,
+  });
+
+  if (res.ok) {
+    showToast(`✅ Sent $${amt.toFixed(2)} to ${_resolvedToName}`, 'success');
+    document.getElementById('balanceDisplay').textContent = res.new_balance_str;
+    document.getElementById('transferTo').value  = '';
+    document.getElementById('transferAmt').value = '';
+    document.getElementById('recipientPreview').style.display = 'none';
+    document.getElementById('transferSummary').style.display  = 'none';
+    _resolvedToId = null; _resolvedToName = null;
+    setTimeout(() => location.reload(), 1600);
+  } else {
+    showToast(`❌ ${res.error}`, 'error');
+    btn.disabled = false; btn.textContent = '📤 Send';
+  }
+});
+</script>
+{% endblock %}

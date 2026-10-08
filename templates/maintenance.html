@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="my">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Waifu Market — Maintenance</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { color-scheme: dark; }
+    body {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      background: radial-gradient(circle at 50% 25%, #20234b 0, #101126 38%, #070812 100%);
+      font-family: 'Inter', system-ui, sans-serif;
+      color: #eef0ff;
+    }
+    .wrap { position: relative; width: min(92vw, 620px); padding: 44px 24px 52px; text-align: center; }
+    .orbit, .orbit::before, .orbit::after { position: absolute; content: ''; border-radius: 50%; pointer-events: none; }
+    .orbit { inset: 2px 5%; border: 1px solid rgba(146, 128, 255, .18); transform: rotate(-18deg); animation: orbit 9s linear infinite; }
+    .orbit::before { width: 9px; height: 9px; top: 11%; left: 8%; background: #71e7ff; box-shadow: 0 0 18px #71e7ff; }
+    .orbit::after { width: 6px; height: 6px; bottom: 9%; right: 14%; background: #ff83bc; box-shadow: 0 0 16px #ff83bc; }
+    .scene { position: relative; height: 155px; margin-bottom: 24px; }
+    .gear { position: absolute; left: 50%; top: 49%; font-size: 6.2rem; line-height: 1; transform: translate(-50%, -50%); opacity: .22; filter: drop-shadow(0 0 18px #8a79ff); animation: spin 8s linear infinite; }
+    .rocket { position: absolute; left: 50%; top: 50%; z-index: 1; font-size: 4.6rem; line-height: 1; transform: translate(-50%, -50%) rotate(-26deg); filter: drop-shadow(0 0 14px #70e9ff); animation: hover 2.4s ease-in-out infinite; }
+    .flame { position: absolute; left: calc(50% - 45px); top: 91px; z-index: 0; width: 36px; height: 58px; border-radius: 52% 48% 60% 40%; background: linear-gradient(#fff18c, #ff6aa7 56%, transparent); transform: rotate(24deg); filter: blur(2px); animation: flame .35s ease-in-out infinite alternate; }
+    h1 { position: relative; font-size: clamp(1.25rem, 4vw, 1.75rem); font-weight: 700; line-height: 1.55; background: linear-gradient(120deg, #77e8ff, #c19aff, #ff8dbd); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    p { position: relative; margin-top: 13px; color: #c9cbe1; font-size: clamp(.95rem, 2.8vw, 1.06rem); line-height: 1.9; }
+    .dots { display: flex; justify-content: center; gap: 9px; margin-top: 25px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #76e8ff; box-shadow: 0 0 12px #76e8ff; animation: pulse 1.25s ease-in-out infinite; }
+    .dot:nth-child(2) { animation-delay: .18s; background: #b394ff; box-shadow: 0 0 12px #b394ff; }
+    .dot:nth-child(3) { animation-delay: .36s; background: #ff8dbd; box-shadow: 0 0 12px #ff8dbd; }
+    @keyframes spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+    @keyframes orbit { to { transform: rotate(342deg); } }
+    @keyframes hover { 0%, 100% { margin-top: 4px; } 50% { margin-top: -9px; } }
+    @keyframes flame { from { transform: rotate(24deg) scaleY(.76); opacity: .65; } to { transform: rotate(24deg) scaleY(1.12); opacity: 1; } }
+    @keyframes pulse { 0%, 100% { transform: translateY(0); opacity: .35; } 50% { transform: translateY(-7px); opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
+  </style>
+</head>
+<body>
+  <main class="wrap" aria-live="polite">
+    <div class="orbit" aria-hidden="true"></div>
+    <div class="scene" aria-hidden="true"><div class="gear">⚙</div><div class="rocket">🚀</div><div class="flame"></div></div>
+    <h1>Bot ပြုပြင်နေပါသဖြင့်<br>ခေတ္တစောင့်ပြီးမှ ပြန်သုံးပေးပါ</h1>
+    <p>လက်ရှိတွင် စနစ်ပြုပြင်ထိန်းသိမ်းမှု ပြုလုပ်နေပါသည်။<br>ပြုပြင်ပြီးပါက အလိုအလျောက် ပြန်လည်အသုံးပြုနိုင်ပါမည်။</p>
+    <div class="dots" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+  </main>
+</body>
+</html>

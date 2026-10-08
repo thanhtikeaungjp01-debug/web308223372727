@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+
+{% block title %}Card Update — Waifu Market{% endblock %}
+
+{% block content %}
+<section class="card-update-page">
+  <div class="card-update-page-topbar">
+    <a class="btn btn-ghost btn-sm" href="{{ url_for('market') }}">‹ Back to Market</a>
+    <div class="card-update-page-brand">🃏 Card Update</div>
+    <span aria-hidden="true"></span>
+  </div>
+
+  <div class="card-update-panel">
+    <div class="card-update-title">Card Update Roulette</div>
+    <p class="card-update-subtitle">Enter your card ID and target card ID. Your source card must be Legend or higher. Their information and the rarity-based chance will appear below; the wheel spins only when you press the Spin button.</p>
+    <div class="card-update-usage" id="cardUpdateUsage" aria-live="polite">Daily: — · Monthly: —</div>
+
+    <div class="card-update-input-grid">
+      <div class="form-group">
+        <label class="form-label" for="cardUpdateSourceId">Your card ID</label>
+        <input class="form-input" id="cardUpdateSourceId" type="text" inputmode="numeric" placeholder="e.g. 12345" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="cardUpdateTargetId">Target card ID</label>
+        <input class="form-input" id="cardUpdateTargetId" type="text" inputmode="numeric" placeholder="e.g. 67890" autocomplete="off">
+      </div>
+    </div>
+    <button class="btn btn-primary card-update-preview-btn" id="cardUpdatePreviewBtn" type="button">Show card information</button>
+    <div class="card-update-error" id="cardUpdateError" style="display:none"></div>
+
+    <div class="card-update-content" id="cardUpdateContent" style="display:none">
+      <div class="card-update-info-pair" aria-live="polite">
+        <div class="card-update-info-card" id="cardUpdateSourceInfo"></div>
+        <div class="card-update-info-divider" aria-hidden="true"></div>
+        <div class="card-update-info-card target" id="cardUpdateTargetInfo"></div>
+      </div>
+
+      <div class="card-update-chance"><span>Update chance</span><strong id="cardUpdateChanceText">—</strong></div>
+      <div class="card-update-wheel-heading">Card Update Roulette</div>
+      <div class="card-update-wheel-wrap">
+        <div class="card-update-wheel-pointer" aria-hidden="true">▼</div>
+        <div class="card-update-wheel" id="cardUpdateWheel" aria-label="Card update roulette">
+          <div class="card-update-wheel-label card-update-wheel-win">UPDATE<br><small id="cardUpdateWheelWinPct">—</small></div>
+          <div class="card-update-wheel-label card-update-wheel-lose">LOSE<br><small id="cardUpdateWheelLosePct">—</small></div>
+          <div class="card-update-wheel-center">SPIN</div>
+        </div>
+      </div>
+      <div class="card-update-result" id="cardUpdateResult" aria-live="polite"></div>
+      <button class="btn btn-primary card-update-spin-btn" id="cardUpdateSpinBtn" type="button" disabled>🎡 Spin update wheel</button>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  let preview = null;
+  let spinning = false;
+  let previewTimer = null;
+  let requestId = 0;
+
+  const $ = id => document.getElementById(id);
+  const escapeHtml = value => String(value || '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+
+  function renderInfo(id, card, role) {
+    const slot = $(id);
+    if (!slot || !card) return;
+    slot.innerHTML = `<span class="card-update-role">${role}</span><strong>${escapeHtml(card.name)}</strong><small>${escapeHtml(card.anime)}</small><span class="card-update-rarity">${escapeHtml(card.rarity)}</span><code>#${escapeHtml(card.id)}</code>`;
+  }
+
+  function formatPercent(value) {
+    const rounded = Number(Number(value).toFixed(1));
+    return `${rounded}%`;
+  }
+
+  function placeWheelLabel(id, middleAngle) {
+    const label = $(id);
+    if (!label) return;
+    // CSS conic-gradient angles start at the top and increase clockwise.
+    // Place the label on the middle angle of its own colored segment.
+    const radians = middleAngle * Math.PI / 180;
+    const radius = 34;
+    const x = 50 + radius * Math.sin(radians);
+    const y = 50 - radius * Math.cos(radians);
+    label.style.left = `${x}%`;
+    label.style.top = `${y}%`;
+    label.style.right = 'auto';
+    label.style.bottom = 'auto';
+    label.style.transform = 'translate(-50%, -50%)';
+  }
+
+  function setChance(chance) {
+    const winPercent = Number((Math.max(0, Math.min(1, Number(chance || 0))) * 100).toFixed(1));
+    const losePercent = Number((100 - winPercent).toFixed(1));
+    const winAngle = winPercent * 3.6;
+    const loseAngle = 360 - winAngle;
+    $('cardUpdateChanceText').textContent = `${formatPercent(winPercent)} success · ${formatPercent(losePercent)} loss`;
+    $('cardUpdateWheelWinPct').textContent = formatPercent(winPercent);
+    $('cardUpdateWheelLosePct').textContent = formatPercent(losePercent);
+    const wheel = $('cardUpdateWheel');
+    wheel?.style.setProperty('--card-update-win-angle', `${winAngle}deg`);
+    placeWheelLabel('cardUpdateWheelWin', winAngle / 2);
+    placeWheelLabel('cardUpdateWheelLose', winAngle + loseAngle / 2);
+  }
+
+  function setUsage(usage, ownerBypass) {
+    const slot = $('cardUpdateUsage');
+    if (!slot || !usage) return;
+    if (ownerBypass) {
+      // Keep the owner allowance private; the bypass still works, but the
+      // public card-update UI must not identify the signed-in user as owner.
+      slot.textContent = '';
+      slot.className = 'card-update-usage';
+      slot.hidden = true;
+      return;
+    }
+    slot.hidden = false;
+    const daily = `${usage.daily_used}/${usage.daily_limit}`;
+    const monthly = `${usage.monthly_used}/${usage.monthly_limit}`;
+    slot.textContent = `Today: ${daily} · This month: ${monthly}`;
+    slot.className = 'card-update-usage';
+  }
+
+  function updateSpinAvailability(usage, ownerBypass) {
+    const allowed = Boolean(ownerBypass || (usage && usage.daily_used < usage.daily_limit && usage.monthly_used < usage.monthly_limit));
+    $('cardUpdateSpinBtn').disabled = !preview || !allowed;
+  }
+
+  function clearPreview() {
+    preview = null;
+    $('cardUpdateContent').style.display = 'none';
+    $('cardUpdateSpinBtn').disabled = true;
+    $('cardUpdateUsage').textContent = 'Daily: — · Monthly: —';
+    $('cardUpdateUsage').className = 'card-update-usage';
+    $('cardUpdateUsage').hidden = false;
+    $('cardUpdateError').style.display = 'none';
+    $('cardUpdateResult').textContent = '';
+    $('cardUpdateChanceText').textContent = '—';
+    $('cardUpdateWheelWinPct').textContent = '—';
+    $('cardUpdateWheelLosePct').textContent = '—';
+    const wheel = $('cardUpdateWheel');
+    wheel.className = 'card-update-wheel';
+    wheel.style.transform = 'rotate(0deg)';
+  }
+
+  async function loadPreview() {
+    const sourceId = $('cardUpdateSourceId').value.trim();
+    const targetId = $('cardUpdateTargetId').value.trim();
+    const error = $('cardUpdateError');
+    const button = $('cardUpdatePreviewBtn');
+    const currentRequest = ++requestId;
+    error.style.display = 'none';
+    if (!sourceId || !targetId) {
+      clearPreview();
+      return;
+    }
+    button.disabled = true;
+    button.textContent = 'Loading card information…';
+    const data = await apiPost('/api/card-update/preview', {source_id: sourceId, target_id: targetId});
+    if (currentRequest !== requestId) return;
+    if (!data.ok) {
+      clearPreview();
+      error.textContent = data.error || 'Unable to load these cards.';
+      error.style.display = 'block';
+      button.disabled = false;
+      button.textContent = 'Show card information';
+      return;
+    }
+    preview = {source_id: sourceId, target_id: targetId};
+    renderInfo('cardUpdateSourceInfo', data.source, 'YOUR CARD');
+    renderInfo('cardUpdateTargetInfo', data.target, 'TARGET CARD');
+    setChance(data.chance);
+    setUsage(data.usage, data.owner_bypass);
+    $('cardUpdateContent').style.display = 'block';
+    updateSpinAvailability(data.usage, data.owner_bypass);
+    $('cardUpdateResult').textContent = '';
+    const wheel = $('cardUpdateWheel');
+    wheel.className = 'card-update-wheel';
+    wheel.style.transform = 'rotate(0deg)';
+    button.disabled = false;
+    button.textContent = 'Refresh card information';
+  }
+
+  $('cardUpdatePreviewBtn').addEventListener('click', loadPreview);
+  ['cardUpdateSourceId', 'cardUpdateTargetId'].forEach(id => $(id).addEventListener('input', () => {
+    clearTimeout(previewTimer);
+    const sourceId = $('cardUpdateSourceId').value.trim();
+    const targetId = $('cardUpdateTargetId').value.trim();
+    if (!sourceId || !targetId) {
+      clearPreview();
+      return;
+    }
+    previewTimer = setTimeout(loadPreview, 350);
+  }));
+
+  $('cardUpdateSpinBtn').addEventListener('click', async () => {
+    if (!preview || spinning) return;
+    const button = $('cardUpdateSpinBtn');
+    const result = $('cardUpdateResult');
+    const wheel = $('cardUpdateWheel');
+    spinning = true;
+    button.disabled = true;
+    button.textContent = '⏳ Wheel is spinning…';
+    result.textContent = '';
+    const data = await apiPost('/api/card-update/spin', preview);
+    if (!data.ok) {
+      result.textContent = data.error || 'Card update failed.';
+      result.className = 'card-update-result is-error';
+      if (data.usage) {
+        setUsage(data.usage, data.owner_bypass);
+        updateSpinAvailability(data.usage, data.owner_bypass);
+      } else {
+        button.disabled = false;
+      }
+      button.textContent = '🎡 Spin update wheel';
+      spinning = false;
+      return;
+    }
+    setChance(data.chance);
+    setUsage(data.usage, data.owner_bypass);
+    const winAngle = Number(data.chance || 0) * 360;
+    const resultAngle = data.winner_idx === 0
+      ? winAngle / 2
+      : winAngle + (360 - winAngle) / 2;
+    const endAngle = 1800 + ((360 - resultAngle) % 360);
+    wheel.classList.add('is-spinning');
+    requestAnimationFrame(() => { wheel.style.transform = `rotate(${endAngle}deg)`; });
+    setTimeout(() => {
+      wheel.classList.remove('is-spinning');
+      wheel.classList.add(data.won ? 'is-win' : 'is-lose');
+      result.textContent = data.message || (data.won ? 'Update success!' : 'Update failed.');
+      result.className = `card-update-result ${data.won ? 'is-win' : 'is-lose'}`;
+      button.textContent = data.won ? '✅ Updated' : '💨 Card lost';
+      spinning = false;
+      // Stay on this page so the user can read the result. The Back to Market
+      // control at the top is the only way to leave after the spin.
+    }, 2900);
+  });
+})();
+</script>
+{% endblock %}

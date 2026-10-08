@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Rocket — Waifu Market{% endblock %}
+{% block content %}
+<section class="rocket-shell" id="rocketGame">
+  <div class="rocket-topbar"><a class="btn btn-ghost btn-sm" href="{{ url_for('market') }}">‹ Back</a><div class="rocket-brand">🚀 Rocket</div><div class="rocket-pool">Pool <strong id="poolValue">${{ '%.2f'|format(rocket_pool / 100) }}</strong></div></div>
+  <div class="rocket-stage" id="rocketStage">
+    <div class="rocket-stars" aria-hidden="true"></div>
+    <div class="rocket-multiplier" id="multiplier">1.00x</div>
+    <div class="rocket-tier" id="poolTier">Pool rule loading…</div>
+    <div class="rocket-trajectory" aria-hidden="true"></div>
+    <svg class="rocket-vector" id="rocketShip" viewBox="0 0 120 120" role="img" aria-label="Rocket animation">
+      <defs><linearGradient id="rocketBody" x1="0" x2="1"><stop stop-color="#6fe8ff"/><stop offset="1" stop-color="#7864ff"/></linearGradient><linearGradient id="rocketFire" x1="0" x2="1"><stop stop-color="#ffe66d"/><stop offset="1" stop-color="#ff5fa2"/></linearGradient></defs>
+      <path class="rocket-flame" d="M30 82 C12 94 11 108 38 98 C24 111 55 106 55 86Z" fill="url(#rocketFire)"/>
+      <path d="M31 76 C36 47 55 24 89 22 C98 53 83 78 51 91Z" fill="url(#rocketBody)" stroke="#c6f7ff" stroke-width="2"/>
+      <circle cx="69" cy="48" r="9" fill="#101a38" stroke="#9df2ff" stroke-width="3"/><circle cx="69" cy="48" r="3" fill="#fff"/>
+      <path d="M43 72 L22 79 L34 91Z M76 70 L91 87 L65 82Z" fill="#4f55c9" stroke="#9bbaff" stroke-width="2"/>
+    </svg>
+    <div class="rocket-status" id="statusText">Loading round…</div>
+  </div>
+  <section class="rocket-history-card"><div class="rocket-history-heading"><strong>Rocket history</strong><span>Last 10 crashes</span></div><div id="rocketHistory" class="rocket-history-list"><div class="rocket-history-empty">No completed rounds yet</div></div></section>
+  <div class="rocket-panel">
+    <div class="rocket-round-row"><span id="phaseText">Waiting for first bet</span><strong id="countdown">—</strong></div>
+    <div class="rocket-bet-row"><input id="betAmount" class="form-input" type="number" min="0.01" step="0.01" placeholder="$ amount"><button id="betBtn" class="btn btn-primary">Place bet 🚀</button></div>
+    <div class="rocket-active-row"><span id="betInfo">No active bet</span><button id="cashoutBtn" class="btn btn-success" disabled>Cash out</button></div>
+    <div class="rocket-balance">Balance: <strong id="balanceValue">${{ '%.2f'|format(balance / 100) }}</strong></div>
+  </div>
+  <section class="rocket-bets-card"><div class="rocket-bets-heading"><strong>Players in this round</strong><span id="playerCount">0 players</span></div><div id="participantList" class="participant-list"><div class="participant-empty">Waiting for bets…</div></div></section>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const $ = id => document.getElementById(id), fmt = cents => `$${(Number(cents || 0) / 100).toFixed(2)}`;
+  const stage = $('rocketStage'), ship = $('rocketShip'); let lastRound = '', phase = '', raf = 0, polling = 0, localBet = null, animRound = '', clockOffset = 0, currentParticipants = [], liveMultiplier = 1, localCashoutMultiplier = null;
+  function stopAnimation(){ if (raf) cancelAnimationFrame(raf); raf = 0; ship.classList.remove('rocket-flying','rocket-crashed'); }
+  function setFlightStyle(roundId){
+    const text = String(roundId || 'rocket');
+    let hash = 0;
+    for(let i=0;i<text.length;i++) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+    const style = (hash % 3) + 1;
+    stage.dataset.flightStyle = String(style);
+    ship.classList.remove('rocket-style-1','rocket-style-2','rocket-style-3');
+    ship.classList.add(`rocket-style-${style}`);
+  }
+  function paintFlight(m, pool){
+    liveMultiplier = Number(m)||1;
+    const hue = m < 2.4 ? 'blue' : m < 5 ? 'purple' : 'red';
+    const flightY = Math.min(150, Math.max(0, (liveMultiplier - 1) * 26));
+    stage.dataset.heat = hue;
+    stage.style.setProperty('--flight-progress', `${Math.min(100, Math.max(0, (m-1)*7))}%`);
+    stage.style.setProperty('--flame-scale', `${(1 + Math.min(1.8, Math.max(0, m-1)*.18)).toFixed(2)}`);
+    ship.style.setProperty('--rocket-y', `${-flightY.toFixed(1)}px`);
+    $('multiplier').textContent = `${liveMultiplier.toFixed(2)}x`;
+  }
+  function animate(data){ if (data.phase !== 'RUNNING') { if (data.phase === 'SETTLED') ship.classList.add('rocket-crashed'); return; } const started = Number(data.started_at || 0) * 1000;
+    if (!started) return;
+    if (animRound !== data.round_id) { stopAnimation(); animRound=data.round_id; setFlightStyle(data.round_id); ship.classList.add('rocket-flying'); }
+    const frame = now => { if (phase !== 'RUNNING') { raf=0; return; } const serverNow = now + clockOffset, elapsed = Math.max(0, serverNow-started)/1000, m = Math.max(1, 1+elapsed*.22); paintFlight(m, data.pool); $('countdown').textContent = localCashoutMultiplier === null ? `${m.toFixed(2)}x` : `${localCashoutMultiplier.toFixed(2)}x`; renderPlayers(currentParticipants, m); raf = requestAnimationFrame(frame); }; if (!raf) raf = requestAnimationFrame(frame);
+  }
+  async function api(url, opts={}){ const controller=new AbortController(), timeout=setTimeout(()=>controller.abort(),7000); try { const sentAt=performance.now(); const r=await fetch(url,{headers:{'Content-Type':'application/json'},signal:controller.signal,...opts}); const receivedAt=performance.now(); const d=await r.json(); if (d.server_now) clockOffset=(Number(d.server_now)*1000)-((sentAt+receivedAt)/2); return d; } catch(e){ return {ok:false,transient:true,error:'Reconnecting…'}; } finally { clearTimeout(timeout); } }
+  function renderHistory(history){ const list=$('rocketHistory'); if(!history||!history.length){list.innerHTML='<div class="rocket-history-empty">No completed rounds yet</div>';return;} list.innerHTML=history.slice(0,10).map(item=>{const m=Number(item.multiplier||1), tone=m<2.4?'low':m<5?'mid':m<13?'purple':m<50?'high':'mega'; return `<span class="rocket-history-chip ${tone}">${m.toFixed(2)}x</span>`;}).join(''); }
+  function renderPlayers(players, multiplier){ currentParticipants = players || []; const list=$('participantList'); $('playerCount').textContent=`${players.length} player${players.length===1?'':'s'}`; if(!players.length){list.innerHTML='<div class="participant-empty">Waiting for bets…</div>';return;} list.innerHTML=players.map(p=>{const active=p.status==='ACTIVE', lost=p.status==='LOST', shownMultiplier=active?(Number(multiplier)||1):Number(p.multiplier||multiplier||1), value=active?Math.round(Number(p.amount)*shownMultiplier):Number(p.payout||0); return `<div class="participant-row ${active?'is-active':lost?'is-lost':'is-cashed'}"><div class="participant-avatar">${String(p.name||'P').slice(0,1).toUpperCase()}</div><div class="participant-name"><strong>${esc(p.name)}</strong><small class="participant-bet-pill">💎 ${fmt(p.amount)} <b>×${shownMultiplier.toFixed(2)}</b></small></div><div class="participant-payout">${active?'💎 ':lost?'✕ ':'✓ '}${lost?'Lose':fmt(value)}</div></div>`;}).join(''); }
+  function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+  function renderBetInfo(b){
+    if(!b) return 'No active bet';
+    const m = Number(b.multiplier || 1).toFixed(2);
+    if(b.status === 'CASHED_OUT') return `✓ Cash out @ ${m}x · ${fmt(b.payout)}`;
+    if(b.status === 'LOST') return `Lose @ ${m}x`;
+    return `${fmt(b.amount)} · ${b.status}`;
+  }
+  function render(d){ if(!d.ok) return; if(d.round_id!==lastRound){lastRound=d.round_id; localBet=null; localCashoutMultiplier=null; stopAnimation(); setFlightStyle(d.round_id);} phase=d.phase; $('poolValue').textContent=fmt(d.pool); $('balanceValue').textContent=fmt(d.balance); $('poolTier').textContent=d.crash_profile?`${d.crash_profile.label} · max ${Number(d.crash_profile.max_x).toFixed(1)}x`:'Pool rule loading…'; $('phaseText').textContent=localCashoutMultiplier !== null && phase==='RUNNING'?'Cashed out':phase==='WAITING'?'Waiting for first bet':phase==='BETTING_OPEN'?'Betting open':phase==='RUNNING'?'Rocket is flying':phase==='CASHED_OUT'?'Cashed out':'Round settled'; $('statusText').textContent=phase==='WAITING'?'Place the first bet to start the 8-second countdown':phase==='BETTING_OPEN'?'Place your bet before launch':phase==='RUNNING'?'Cash out before crash':phase==='CASHED_OUT'?'✓ Cashout confirmed — waiting for crash':'Crash — waiting for next bet'; $('betBtn').disabled=!['WAITING','BETTING_OPEN'].includes(phase)||!!localBet; $('betAmount').disabled=!['WAITING','BETTING_OPEN'].includes(phase)||!!localBet; $('cashoutBtn').disabled=phase!=='RUNNING'||!localBet||localBet.status!=='ACTIVE'; if(phase==='WAITING') $('countdown').textContent='—'; else if(phase==='BETTING_OPEN') $('countdown').textContent=`${Math.max(0,Math.ceil(Number(d.ends_at)-Date.now()/1000))}s`; else $('countdown').textContent=phase==='RUNNING'?(localCashoutMultiplier === null ? `${Number(d.multiplier||1).toFixed(2)}x` : `${localCashoutMultiplier.toFixed(2)}x`):'—'; if (phase==='SETTLED') { const crashedAt=Number(d.crash_multiplier||d.multiplier||1); stopAnimation(); paintFlight(crashedAt); $('countdown').textContent=`${crashedAt.toFixed(2)}x`; $('statusText').textContent=`Crashed at ${crashedAt.toFixed(2)}x`; ship.classList.add('rocket-crashed'); } if(d.bet) localBet=d.bet; if(localBet?.status==='CASHED_OUT' && localCashoutMultiplier===null) localCashoutMultiplier=Number(localBet.multiplier||1); $('betInfo').textContent=renderBetInfo(localBet); if(phase==='RUNNING' && localBet?.status==='CASHED_OUT') $('statusText').textContent='✓ Cashout confirmed — Rocket still flying'; renderHistory(d.history||[]); renderPlayers(d.participants||[],d.multiplier); if(phase==='RUNNING') animate(d); else if(phase==='SETTLED'){stopAnimation(); ship.classList.add('rocket-crashed');} }
+  let pollDelay=350;
+  async function poll(){ const d=await api('/api/rocket/state'); if(d.ok){ render(d); pollDelay=d.phase==='RUNNING'?300:1000; } else if(!d.transient){ $('statusText').textContent=d.error||'Rocket unavailable'; } else if(!$('statusText').textContent || $('statusText').textContent==='Loading round…'){ $('statusText').textContent='Reconnecting…'; } polling=setTimeout(poll, pollDelay); pollDelay=Math.min(2000, Math.round(pollDelay*1.35)); }
+  $('betBtn').onclick=async()=>{ const amount=Number($('betAmount').value); const d=await api('/api/rocket/bet',{method:'POST',body:JSON.stringify({amount})}); if(d.ok){localBet=d.bet; $('betAmount').value=''; await pollOnce();} else $('statusText').textContent=d.error; };
+  async function pollOnce(){ const d=await api('/api/rocket/state'); if(d.ok) render(d); }
+  $('cashoutBtn').onclick=async()=>{ const frozenAt=Number(liveMultiplier||1); $('statusText').textContent='Cashing out…'; $('cashoutBtn').disabled=true; const d=await api('/api/rocket/cashout',{method:'POST',body:'{}'}); if(d.ok){ const settledAt=Number(d.multiplier||frozenAt); localCashoutMultiplier=settledAt; localBet={...localBet,status:'CASHED_OUT',payout:d.payout,multiplier:settledAt}; $('betInfo').textContent=renderBetInfo(localBet); $('countdown').textContent=`${settledAt.toFixed(2)}x`; $('statusText').textContent=`✓ Cashed out at ${settledAt.toFixed(2)}x — Rocket still flying`; $('balanceValue').textContent=fmt(d.balance); $('poolValue').textContent=fmt(d.pool); await pollOnce(); } else { $('statusText').textContent=d.error||'Cashout failed'; $('cashoutBtn').disabled=false; } };
+  poll();
+})();
+</script>
+{% endblock %}

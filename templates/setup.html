@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Setup — Waifu Market</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    .setup-wrap {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+      background: var(--bg);
+    }
+    .setup-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 40px;
+      width: 100%;
+      max-width: 560px;
+      box-shadow: var(--shadow);
+    }
+    .setup-logo { font-size: 2.5rem; text-align: center; margin-bottom: 8px; }
+    .setup-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 4px;
+      background: var(--grad);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .setup-sub {
+      text-align: center;
+      color: var(--text2);
+      font-size: .9rem;
+      margin-bottom: 28px;
+    }
+    .form-section {
+      margin-bottom: 20px;
+    }
+    .form-section-title {
+      font-size: .75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--text3);
+      margin-bottom: 12px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .form-group { margin-bottom: 14px; }
+    .form-label {
+      display: block;
+      font-size: .85rem;
+      font-weight: 500;
+      color: var(--text2);
+      margin-bottom: 6px;
+    }
+    .form-label span.req { color: var(--pink); margin-left: 2px; }
+    .form-label span.opt { color: var(--text3); font-weight: 400; font-size: .78rem; }
+    .form-input {
+      width: 100%;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      color: var(--text);
+      font-size: .9rem;
+      font-family: inherit;
+      transition: border-color .2s;
+      outline: none;
+    }
+    .form-input:focus { border-color: var(--purple); }
+    .form-hint {
+      font-size: .78rem;
+      color: var(--text3);
+      margin-top: 4px;
+    }
+    .setup-btn {
+      width: 100%;
+      padding: 13px;
+      background: var(--grad);
+      border: none;
+      border-radius: var(--radius-sm);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: opacity .2s;
+    }
+    .setup-btn:hover { opacity: .88; }
+    .alert-error {
+      background: rgba(255,80,112,.12);
+      border: 1px solid rgba(255,80,112,.3);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      color: var(--error);
+      font-size: .88rem;
+      margin-bottom: 18px;
+    }
+    .step-badge {
+      display: inline-block;
+      background: var(--grad);
+      color: #fff;
+      font-size: .7rem;
+      font-weight: 700;
+      border-radius: 20px;
+      padding: 2px 8px;
+      margin-right: 6px;
+    }
+    .how-to {
+      background: rgba(176,96,255,.08);
+      border: 1px solid rgba(176,96,255,.2);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+      margin-bottom: 24px;
+      font-size: .85rem;
+      color: var(--text2);
+      line-height: 1.7;
+    }
+    .how-to code {
+      background: rgba(255,255,255,.08);
+      border-radius: 4px;
+      padding: 1px 6px;
+      color: var(--purple);
+      font-size: .82rem;
+    }
+  </style>
+</head>
+<body>
+<div class="setup-wrap">
+  <div class="setup-card">
+    <div class="setup-logo">🌸</div>
+    <h1 class="setup-title">Waifu Market Setup</h1>
+    <p class="setup-sub">
+      {% if configured %}Update connection settings{% else %}Connect your bot & database to get started{% endif %}
+    </p>
+
+    {% if error %}
+    <div class="alert-error">❌ {{ error }}</div>
+    {% endif %}
+
+    <div class="how-to">
+      <b>How to get your values:</b><br>
+      <span class="step-badge">1</span>Run the bot → send <code>/api</code> → copy the key as <b>Bot API Key</b><br>
+      <span class="step-badge">2</span>Use your MongoDB Atlas connection string as <b>MONGO_URI</b><br>
+      <span class="step-badge">3</span>Your Telegram numeric user ID is the <b>Owner ID</b><br>
+      <span class="step-badge">4</span><b>Bot API URL</b> = the URL where your bot is hosted (Render/Replit URL)
+    </div>
+
+    <form method="POST" action="{{ url_for('setup') }}">
+
+      <div class="form-section">
+        <div class="form-section-title">🤖 Telegram Bot</div>
+        <div class="form-group">
+          <label class="form-label">Bot Token <span class="req">*</span></label>
+          <input class="form-input" type="password" name="BOT_TOKEN"
+                 placeholder="123456:ABC-DEF…"
+                 value="{{ 'set' if bot_token_set else '' }}"
+                 autocomplete="off">
+          <div class="form-hint">From @BotFather. Already set if showing "set".</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Bot Username <span class="opt">(optional)</span></label>
+          <input class="form-input" type="text" name="BOT_USERNAME"
+                 placeholder="MyWaifuBot"
+                 value="{{ config.BOT_USERNAME }}">
+          <div class="form-hint">Without @. Used for the Telegram login widget.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Bot API URL <span class="opt">(for status widget)</span></label>
+          <input class="form-input" type="url" name="BOT_API_URL"
+                 placeholder="https://your-bot.onrender.com"
+                 value="{{ config.BOT_API_URL }}">
+          <div class="form-hint">The URL where your bot is hosted — for live status in Admin panel.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Bot API Key <span class="opt">(from /api command)</span></label>
+          <input class="form-input" type="password" name="BOT_API_KEY"
+                 placeholder="d0ce1677f9d44de5…"
+                 autocomplete="off">
+          <div class="form-hint">Generate with <code>/api</code> in your bot. Used to authenticate API requests.</div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">🗄️ Database</div>
+        <div class="form-group">
+          <label class="form-label">MongoDB URI <span class="req">*</span></label>
+          <input class="form-input" type="password" name="MONGO_URI"
+                 placeholder="mongodb+srv://user:pass@cluster.mongodb.net/…"
+                 value="{{ 'set' if mongo_set else '' }}"
+                 autocomplete="off">
+          <div class="form-hint">MongoDB Atlas connection string. Already set if showing "set".</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Database Name <span class="opt">(default: waifu_bot)</span></label>
+          <input class="form-input" type="text" name="DB_NAME"
+                 placeholder="waifu_bot"
+                 value="{{ config.DB_NAME }}">
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title">👤 Owner</div>
+        <div class="form-group">
+          <label class="form-label">Owner Telegram ID <span class="req">*</span></label>
+          <input class="form-input" type="text" name="OWNER_ID"
+                 placeholder="123456789"
+                 value="{{ config.OWNER_ID }}">
+          <div class="form-hint">Your numeric Telegram user ID. Get it from @userinfobot.</div>
+        </div>
+      </div>
+
+      <button type="submit" class="setup-btn">
+        {% if configured %}💾 Save Settings{% else %}🚀 Connect & Launch{% endif %}
+      </button>
+    </form>
+  </div>
+</div>
+</body>
+</html>

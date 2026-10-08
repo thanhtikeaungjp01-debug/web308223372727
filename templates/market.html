@@ -1,0 +1,726 @@
+{% extends "base.html" %}
+{% block title %}Market — Waifu Market{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <a href="{{ url_for('index') }}" class="btn btn-ghost btn-sm" style="position:absolute;right:0;top:-10px;z-index:2;">‹ Back</a>
+  <div class="spin-wheel-bg" aria-hidden="true">
+    <svg class="spin-wheel-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="100" cy="100" r="96" fill="none" stroke="rgba(176,96,255,0.18)" stroke-width="3"/>
+      <circle cx="100" cy="100" r="70" fill="none" stroke="rgba(255,96,192,0.13)" stroke-width="2"/>
+      <circle cx="100" cy="100" r="44" fill="none" stroke="rgba(176,96,255,0.12)" stroke-width="1.5"/>
+      <circle cx="100" cy="100" r="10" fill="rgba(176,96,255,0.25)" stroke="rgba(255,96,192,0.4)" stroke-width="2"/>
+      <!-- Spokes -->
+      <line x1="100" y1="4"   x2="100" y2="196" stroke="rgba(176,96,255,0.15)" stroke-width="1.5"/>
+      <line x1="4"   y1="100" x2="196" y2="100" stroke="rgba(176,96,255,0.15)" stroke-width="1.5"/>
+      <line x1="21"  y1="21"  x2="179" y2="179" stroke="rgba(255,96,192,0.12)" stroke-width="1.5"/>
+      <line x1="179" y1="21"  x2="21"  y2="179" stroke="rgba(255,96,192,0.12)" stroke-width="1.5"/>
+      <line x1="100" y1="4"   x2="100" y2="196" stroke="rgba(176,96,255,0.08)" stroke-width="1" transform="rotate(22.5 100 100)"/>
+      <line x1="100" y1="4"   x2="100" y2="196" stroke="rgba(176,96,255,0.08)" stroke-width="1" transform="rotate(67.5 100 100)"/>
+      <line x1="100" y1="4"   x2="100" y2="196" stroke="rgba(176,96,255,0.08)" stroke-width="1" transform="rotate(112.5 100 100)"/>
+      <line x1="100" y1="4"   x2="100" y2="196" stroke="rgba(176,96,255,0.08)" stroke-width="1" transform="rotate(157.5 100 100)"/>
+      <!-- Rim dots -->
+      <circle cx="100" cy="4"  r="3" fill="rgba(255,96,192,0.3)"/>
+      <circle cx="196" cy="100" r="3" fill="rgba(255,96,192,0.3)"/>
+      <circle cx="100" cy="196" r="3" fill="rgba(255,96,192,0.3)"/>
+      <circle cx="4"   cy="100" r="3" fill="rgba(255,96,192,0.3)"/>
+      <circle cx="29"  cy="29"  r="2.5" fill="rgba(176,96,255,0.25)"/>
+      <circle cx="171" cy="29"  r="2.5" fill="rgba(176,96,255,0.25)"/>
+      <circle cx="171" cy="171" r="2.5" fill="rgba(176,96,255,0.25)"/>
+      <circle cx="29"  cy="171" r="2.5" fill="rgba(176,96,255,0.25)"/>
+    </svg>
+  </div>
+  <h1 class="page-title">🏪 Market
+    <span class="badge-count">{{ total }}</span>
+  </h1>
+  <p class="page-subtitle">Buy characters from other players</p>
+</div>
+
+{% if welcome_slides %}
+<section class="welcome-carousel" aria-label="Welcome">
+  <style>.welcome-carousel{max-width:760px;margin-left:auto;margin-right:auto}.welcome-track{max-height:220px}.welcome-slide{max-height:220px;object-fit:cover}</style>
+  <div class="welcome-track" id="welcomeTrack">
+    {% for slide in welcome_slides %}
+    <img class="welcome-slide{% if loop.first %} is-active{% endif %}" src="{{ slide }}" alt="Welcome" loading="{% if loop.first %}eager{% else %}lazy{% endif %}">
+    {% endfor %}
+  </div>
+  {% if welcome_slides|length > 1 %}<div class="welcome-dots" aria-hidden="true">{% for slide in welcome_slides %}<span class="welcome-dot{% if loop.first %} is-active{% endif %}"></span>{% endfor %}</div>{% endif %}
+</section>
+{% endif %}
+{% if welcome_slides|length > 1 %}
+<script>
+(() => {
+  const slides = [...document.querySelectorAll('.welcome-slide')];
+  const dots = [...document.querySelectorAll('.welcome-dot')];
+  if (slides.length < 2) return;
+  let current = 0;
+  window.setInterval(() => {
+    slides[current].classList.remove('is-active');
+    dots[current]?.classList.remove('is-active');
+    current = (current + 1) % slides.length;
+    slides[current].classList.add('is-active');
+    dots[current]?.classList.add('is-active');
+  }, 2000);
+})();
+</script>
+{% endif %}
+
+<!-- Search & filter bar -->
+<form method="GET" action="{{ url_for('market') }}" class="filter-bar" id="filterForm">
+  <div class="search-wrap">
+    <span class="search-icon">🔍</span>
+    <input type="text" name="q" value="{{ search }}"
+           placeholder="Search name or anime…" class="search-input" id="searchInput">
+    {% if search %}
+    <button type="button" class="search-clear" onclick="document.getElementById('searchInput').value='';document.getElementById('filterForm').submit()">✕</button>
+    {% endif %}
+  </div>
+  <select name="rarity" class="rarity-select" onchange="this.form.submit()">
+    <option value="">All rarities</option>
+    {% for r in rarities %}
+    <option value="{{ r }}" {% if rarity == r %}selected{% endif %}>{{ r }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+  {% if rarity or search %}
+  <a href="{{ url_for('market') }}" class="btn btn-ghost btn-sm">Clear</a>
+  {% endif %}
+</form>
+
+<!-- Listings grid -->
+{% if listings %}
+<div class="card-grid" id="listingGrid">
+  {% for lst in listings %}
+  <div class="char-card" data-lid="{{ lst._id_str }}">
+    <div class="char-img-wrap">
+      {% if lst.char_video %}
+      <video src="{{ lst.char_video }}"
+             class="char-img char-video"
+             controls playsinline
+             preload="{% if loop.index > 3 %}none{% else %}metadata{% endif %}"
+             {% if lst.char_img %}poster="{{ lst.char_img }}"{% endif %}
+             aria-label="{{ lst.char.name }} video">
+      </video>
+      {% else %}
+      <img src="{{ lst.char_img }}"
+           alt="{{ lst.char.name }}"
+           class="char-img"
+           decoding="async"
+           {% if loop.index > 6 %}loading="lazy"{% else %}fetchpriority="high"{% endif %}
+           onerror="this.onerror=null;this.src='/static/img/no_image.png';this.classList.add('img-ready');this.closest('.char-img-wrap')?.classList.add('loaded');">
+      {% endif %}
+      <div class="rarity-badge rarity-{{ lst.char.rarity | replace(' ','_') | replace('️','') }}">
+        {{ lst.char.rarity }}
+      </div>
+      <div class="view-badge">👁 {{ lst.views }}</div>
+    </div>
+    <div class="char-info">
+      <div class="char-name">{{ lst.char.name }}</div>
+      <div class="char-anime">{{ lst.char.anime }}</div>
+      <div class="listing-meta">
+        <span class="seller-name">👤 {{ lst.seller_name }}</span>
+        <span class="listed-ago">{{ lst.ago }}</span>
+      </div>
+    </div>
+    <div class="card-footer">
+      <div class="price-tag">{% if lst.is_auction %}🔨 {{ lst.bid_str }}<small> / min {{ lst.price_str }}</small>{% else %}{{ lst.price_str }}{% endif %}</div>
+      {% if user %}
+        {% if user.id != lst.seller_id %}
+        {% if lst.is_auction %}<button class="btn btn-primary btn-sm bid-btn" data-lid="{{ lst._id_str }}" data-name="{{ lst.char.name }}" data-price="{{ lst.price_str }}" data-bid="{{ lst.bid_str }}">🔨 Bid</button>{% else %}<button class="btn btn-primary btn-sm buy-btn"
+                data-lid="{{ lst._id_str }}"
+                data-name="{{ lst.char.name }}"
+                data-price="{{ lst.price_str }}">
+          🛒 Buy
+        </button>{% endif %}
+        <button class="btn btn-lucky btn-sm lucky-btn"
+                data-lid="{{ lst._id_str }}"
+                data-name="{{ lst.char.name|e }}"
+                data-price-cents="{{ lst.price }}"
+                data-price="{{ lst.price_str }}"
+                data-img="{{ (lst.char_img or '')|e }}"
+                data-video="{{ (lst.char_video or '')|e }}"
+                data-logo="{{ (site_logo_url or '')|e }}"
+                title="Lucky Buy this card" aria-label="Lucky Buy this card">☘️</button>
+        {% else %}
+        <button class="btn btn-danger btn-sm delist-btn"
+                data-lid="{{ lst._id_str }}">
+          ❌ Delist
+        </button>
+        {% endif %}
+        {% if is_owner and user.id != lst.seller_id %}
+        <button class="btn btn-danger btn-xs admin-delist-btn"
+                data-lid="{{ lst._id_str }}"
+                title="Admin delist">🗑️</button>
+        {% endif %}
+      {% else %}
+      <a href="{{ url_for('index') }}" class="btn btn-ghost btn-sm">Login to buy</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Pagination -->
+{% if pages > 1 %}
+<div class="pagination">
+  {% if page > 1 %}
+  <a href="?page={{ page-1 }}&q={{ search }}&rarity={{ rarity }}" class="page-btn">← Prev</a>
+  {% endif %}
+  {% for p in range([1, page-2]|max, [pages+1, page+3]|min) %}
+  <a href="?page={{ p }}&q={{ search }}&rarity={{ rarity }}"
+     class="page-btn {% if p == page %}active{% endif %}">{{ p }}</a>
+  {% endfor %}
+  {% if page < pages %}
+  <a href="?page={{ page+1 }}&q={{ search }}&rarity={{ rarity }}" class="page-btn">Next →</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+  <div class="empty-icon">🌸</div>
+  <div class="empty-title">No listings found</div>
+  <div class="empty-desc">
+    {% if search or rarity %}
+    Try adjusting your search or filter.
+    {% else %}
+    Be the first to list a character!
+    {% endif %}
+  </div>
+  {% if user %}
+  <a href="{{ url_for('harem') }}" class="btn btn-primary">Go to Harem to sell</a>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Buy confirmation modal -->
+<div class="modal-overlay" id="buyModal" style="display:none">
+  <div class="modal">
+    <div class="modal-title">🛒 Confirm Purchase</div>
+    <div class="modal-body">
+      <p>Buy <strong id="buyName"></strong> for <strong id="buyPrice"></strong>?</p>
+      <p class="modal-note">This will be added to your Telegram harem.</p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('buyModal')">Cancel</button>
+      <button class="btn btn-primary" id="buyConfirmBtn">Confirm Buy</button>
+    </div>
+  </div>
+</div>
+
+<!-- Lucky Buy modal: the media shown here is the listed card's own image/video. -->
+<div class="modal-overlay" id="luckyModal" style="display:none">
+  <div class="modal lucky-modal">
+    <button class="lucky-modal-close" type="button" onclick="closeModal('luckyModal')" aria-label="Close">✕</button>
+    <div class="modal-title">☘️ Lucky Buy</div>
+    <div class="lucky-media-wrap lucky-reel-wrap" id="luckyMediaWrap">
+      <div class="lucky-reel-pointer lucky-reel-pointer-top" aria-hidden="true"></div>
+      <div class="lucky-reel-window">
+        <div class="lucky-reel" id="luckyReel">
+          <div class="lucky-reel-slot"></div><div class="lucky-reel-slot"></div><div class="lucky-reel-slot"></div><div class="lucky-reel-slot lucky-reel-slot-center"></div><div class="lucky-reel-slot"></div><div class="lucky-reel-slot"></div><div class="lucky-reel-slot"></div>
+        </div>
+      </div>
+      <div class="lucky-reel-pointer lucky-reel-pointer-bottom" aria-hidden="true"></div>
+    </div>
+    <div class="lucky-card-name" id="luckyName"></div>
+    <div class="lucky-card-price" id="luckyPrice"></div>
+    <div class="lucky-form-row">
+      <label class="form-label" for="luckyStakeInput">Lucky amount ($)</label>
+      <input class="form-input" id="luckyStakeInput" type="number" min="5" step="0.01" value="5">
+    </div>
+    <div class="lucky-chance-box">
+      <span>Winning chance</span><strong id="luckyChance">0%</strong>
+    </div>
+    <p class="modal-note">Minimum $5.00. More internal coins increase the chance, up to 75%. Your stake goes to the Lucky Pool. If you win, the card goes to you and the seller receives the full listing price from the Lucky Pool. The pool must cover the card price before a win is possible.</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" type="button" onclick="closeModal('luckyModal')">Cancel</button>
+      <button class="btn btn-primary" id="luckyBuyConfirmBtn" type="button">☘️ Try Lucky Buy</button>
+    </div>
+  </div>
+</div>
+
+{% if rocket_show %}
+<a class="rocket-fab" href="{{ url_for('rocket') }}" aria-label="Open Rocket game"><svg class="rocket-fab-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M8 22c4-1 7-5 8-12 6 1 8 4 8 9-4 1-8 2-12 7l-4-4Z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="20" cy="14" r="2" fill="currentColor"/><path d="M10 22 5 23l4 4 1-5Z" fill="currentColor"/></svg><span><strong>Rocket</strong><small>Bet &amp; cash out</small></span></a>
+{% endif %}
+
+{% if wheel_show %}
+<!-- Spin Wheel FAB -->
+<button class="wheel-fab" id="openWheelBtn" onclick="openWheelModal()" type="button">
+  <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" width="26" height="26">
+    <circle cx="20" cy="20" r="17" stroke="white" stroke-width="2"/>
+    <circle cx="20" cy="20" r="4" fill="white"/>
+    <line x1="20" y1="3" x2="20" y2="16" stroke="white" stroke-width="1.8"/>
+    <line x1="20" y1="24" x2="20" y2="37" stroke="white" stroke-width="1.8"/>
+    <line x1="3" y1="20" x2="16" y2="20" stroke="white" stroke-width="1.8"/>
+    <line x1="24" y1="20" x2="37" y2="20" stroke="white" stroke-width="1.8"/>
+    <line x1="7.57" y1="7.57" x2="16.5" y2="16.5" stroke="white" stroke-width="1.8"/>
+    <line x1="23.5" y1="23.5" x2="32.43" y2="32.43" stroke="white" stroke-width="1.8"/>
+    <line x1="32.43" y1="7.57" x2="23.5" y2="16.5" stroke="white" stroke-width="1.8"/>
+    <line x1="16.5" y1="23.5" x2="7.57" y2="32.43" stroke="white" stroke-width="1.8"/>
+  </svg>
+  <span>Wheel</span>
+</button>
+
+<!-- Spin Wheel Modal -->
+<div class="modal-overlay" id="wheelModal" style="display:none;z-index:9995">
+  <div class="modal wheel-modal">
+    <button class="wheel-modal-close" onclick="closeModal('wheelModal')">✕</button>
+    <div class="wheel-modal-title">🎡 Free Spin</div>
+
+    <div class="wheel-strip-wrap">
+      <div class="wheel-strip-pointer-top"></div>
+      <div class="wheel-strip-pointer-bottom"></div>
+      <div class="wheel-strip-outer" id="wheelStripOuter">
+        <div class="wheel-strip-inner" id="wheelStrip">
+          <div style="padding:20px 40px;color:var(--text3);font-size:.85rem;white-space:nowrap;">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wheel-modal-body">
+      <div class="wheel-code-error" id="wheelCodeError" style="display:none"></div>
+      <div class="wheel-code-hint">ℹ️ Enter a secret code to spin</div>
+      <input type="text" id="wheelCodeInput" class="form-input wheel-code-input"
+             placeholder="Enter secret code…" autocomplete="off" autocorrect="off"
+             spellcheck="false" style="text-transform:uppercase;letter-spacing:2px;">
+      <button class="btn btn-primary wheel-spin-btn" id="wheelSpinBtn">🎰 Spin</button>
+
+      <div class="wheel-history-section" id="wheelHistorySection" style="display:none">
+        <div class="wheel-prizes-title">🕐 Last 10 Spins:</div>
+        <div class="wheel-history-list" id="wheelHistoryList"></div>
+      </div>
+
+      <div class="wheel-prizes-section">
+        <div class="wheel-prizes-title">Possible prizes:</div>
+        <div class="wheel-prizes-grid" id="wheelPrizesGrid">
+          <div style="color:var(--text3);font-size:.8rem;grid-column:1/-1;padding:8px 0;">Loading…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if card_update_show %}
+<!-- Card Update entry point: opens a separate page so Market stays uncluttered. -->
+<a class="card-update-fab" href="{{ url_for('card_update_page') }}" aria-label="Open Card Update">
+  <span class="card-update-fab-icon" aria-hidden="true">🃏</span>
+  <span><strong>Update</strong><small>Card roulette</small></span>
+</a>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ── View tracking via IntersectionObserver ── */
+(function(){
+  const seen = new Set();
+  const obs  = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      const card = e.target;
+      const lid  = card.dataset.lid;
+      if (lid && !seen.has(lid)) {
+        seen.add(lid);
+        obs.unobserve(card);
+        fetch(`/api/view/${lid}`, {method:'POST'}).catch(()=>{});
+        // update badge live
+        const badge = card.querySelector('.view-badge');
+        if (badge) {
+          const cur = parseInt(badge.textContent.replace(/\D/g,'')) || 0;
+          badge.textContent = `👁 ${cur + 1}`;
+        }
+      }
+    });
+  }, {threshold: 0.4});
+  document.querySelectorAll('.char-card[data-lid]').forEach(c => obs.observe(c));
+})();
+
+document.querySelectorAll('.bid-btn').forEach(btn => btn.addEventListener('click', async () => {
+  const amount = prompt(`Bid for ${btn.dataset.name}. Minimum: ${btn.dataset.bid === 'No bids' ? btn.dataset.price : 'higher than ' + btn.dataset.bid} ($)`, '');
+  if (amount === null) return;
+  const res = await apiPost(`/api/auction/bid/${btn.dataset.lid}`, {amount});
+  if (res.ok) { showToast('✅ Bid placed and funds reserved.', 'success'); setTimeout(() => location.reload(), 700); }
+  else showToast(`❌ ${res.error}`, 'error');
+}));
+let _buyLid = null;
+
+document.querySelectorAll('.buy-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    _buyLid = btn.dataset.lid;
+    document.getElementById('buyName').textContent  = btn.dataset.name;
+    document.getElementById('buyPrice').textContent = btn.dataset.price;
+    showModal('buyModal');
+  });
+});
+
+document.getElementById('buyConfirmBtn').addEventListener('click', async () => {
+  if (!_buyLid) return;
+  const btn = document.getElementById('buyConfirmBtn');
+  btn.disabled = true; btn.textContent = 'Buying…';
+  const res = await apiPost(`/api/buy/${_buyLid}`);
+  closeModal('buyModal');
+  if (res.ok) {
+    showToast(`✅ Bought ${res.char?.name || 'character'}!`, 'success');
+    document.querySelector(`[data-lid="${_buyLid}"]`)?.remove();
+  } else {
+    showToast(`❌ ${res.error}`, 'error');
+  }
+  btn.disabled = false; btn.textContent = 'Confirm Buy';
+});
+
+let _luckyLid = null;
+let _luckyPriceCents = 0;
+function updateLuckyChance() {
+  const input = document.getElementById('luckyStakeInput');
+  const amount = Math.max(0, parseFloat(input.value || '0')) * 100;
+  const chance = _luckyPriceCents > 0 ? Math.min(75, amount / _luckyPriceCents * 100) : 0;
+  document.getElementById('luckyChance').textContent = `${chance.toFixed(2).replace(/\.00$/, '')}%`;
+}
+
+const _luckyAssetCache = new Map();
+function preloadLuckyAsset(src) {
+  if (!src) return Promise.resolve();
+  if (_luckyAssetCache.has(src)) return _luckyAssetCache.get(src);
+  const promise = new Promise(resolve => {
+    const image = new Image();
+    image.onload = () => {
+      const decoded = image.decode ? image.decode() : Promise.resolve();
+      Promise.resolve(decoded).catch(() => {}).finally(resolve);
+    };
+    image.onerror = resolve;
+    image.src = src;
+  });
+  _luckyAssetCache.set(src, promise);
+  return promise;
+}
+function luckyMediaNode(item, alt) {
+  if (item && item.emoji) {
+    const emoji = document.createElement('span');
+    emoji.className = 'lucky-reel-emoji'; emoji.textContent = item.emoji;
+    emoji.setAttribute('aria-label', alt);
+    return emoji;
+  }
+  if (!item || !item.src) {
+    const fallback = document.createElement('span');
+    fallback.className = 'lucky-reel-fallback'; fallback.textContent = '☘️';
+    return fallback;
+  }
+  const image = document.createElement('img');
+  image.src = item.src; image.alt = alt; image.className = 'lucky-reel-media';
+  image.loading = 'eager'; image.decoding = 'sync';
+  return image;
+}
+const LUCKY_SLOT_COUNT = 25;
+const LUCKY_PREVIEW_INDEX = 12;
+const LUCKY_TARGET_INDEX = 20;
+const LUCKY_GAP = 8;
+function ensureLuckySlots() {
+  const reel = document.getElementById('luckyReel');
+  if (!reel) return [];
+  if (reel.children.length !== LUCKY_SLOT_COUNT) {
+    reel.replaceChildren(...Array.from({length: LUCKY_SLOT_COUNT}, () => {
+      const slot = document.createElement('div');
+      slot.className = 'lucky-reel-slot';
+      return slot;
+    }));
+  }
+  return [...reel.querySelectorAll('.lucky-reel-slot')];
+}
+function layoutLuckyReel(index = LUCKY_PREVIEW_INDEX) {
+  const reel = document.getElementById('luckyReel');
+  const windowEl = document.querySelector('.lucky-reel-window');
+  if (!reel || !windowEl) return null;
+  const slotWidth = Math.max(88, Math.min(146, (windowEl.clientWidth - 36) / 3));
+  const step = slotWidth + LUCKY_GAP;
+  const centerX = windowEl.clientWidth / 2;
+  reel.style.setProperty('--lucky-slot-width', `${slotWidth}px`);
+  reel.style.width = `${LUCKY_SLOT_COUNT * slotWidth + (LUCKY_SLOT_COUNT - 1) * LUCKY_GAP}px`;
+  const transform = centerX - (index * step + slotWidth / 2);
+  reel.style.transform = `translateX(${transform}px)`;
+  return {transform, step, centerX, slotWidth};
+}
+function renderLuckyFrame(btn, cardWeight, finalType, resultIndex = LUCKY_PREVIEW_INDEX) {
+  const reel = document.getElementById('luckyReel');
+  const slots = ensureLuckySlots();
+  if (!reel || !slots.length) return;
+  const card = {src: btn.dataset.img || '', type: 'card'};
+  const logoEmojis = ['♻️', '☘️', '💠'];
+  const forcedCardIndex = card.src ? Math.floor(Math.random() * slots.length) : -1;
+  slots.forEach((slot, index) => {
+    let type = index === resultIndex && finalType ? finalType : (Math.random() < cardWeight ? 'card' : 'logo');
+    if (card.src && index === forcedCardIndex && !(index === resultIndex && finalType === 'logo')) type = 'card';
+    const item = type === 'card' ? card : {
+      emoji: logoEmojis[Math.floor(Math.random() * logoEmojis.length)], type: 'logo'
+    };
+    slot.replaceChildren(luckyMediaNode(item, type === 'card' ? btn.dataset.name : 'Waifu Market'));
+    slot.dataset.type = type;
+    slot.classList.toggle('lucky-reel-card', type === 'card');
+    slot.classList.toggle('lucky-reel-logo', type === 'logo');
+    slot.classList.toggle('lucky-reel-result', Boolean(finalType && index === resultIndex));
+    slot.style.setProperty('--slot-delay', `${index * 18}ms`);
+  });
+}
+function showLuckyPreview(btn) {
+  const reel = document.getElementById('luckyReel');
+  reel?.classList.remove('lucky-reel-spinning', 'lucky-reel-win', 'lucky-reel-loss');
+  reel && (reel.style.transition = 'none');
+  ensureLuckySlots();
+  layoutLuckyReel(LUCKY_PREVIEW_INDEX);
+  renderLuckyFrame(btn, 0.35, 'card', LUCKY_PREVIEW_INDEX);
+}
+function spinLuckyReel(btn, won, chance) {
+  return new Promise(resolve => {
+    const weight = Math.min(1, Math.max(0, Number(chance || 0) / .75));
+    const reel = document.getElementById('luckyReel');
+    const layout = layoutLuckyReel(LUCKY_PREVIEW_INDEX);
+    if (!reel || !layout) return resolve();
+    const target = layout.centerX - (LUCKY_TARGET_INDEX * layout.step + layout.slotWidth / 2);
+    const duration = 2800;
+    const interval = setInterval(() => renderLuckyFrame(btn, weight, null, LUCKY_PREVIEW_INDEX), 140);
+    reel.classList.remove('lucky-reel-win', 'lucky-reel-loss');
+    reel.classList.add('lucky-reel-spinning');
+    reel.style.transition = `transform ${duration}ms cubic-bezier(.08,.78,.16,1)`;
+    requestAnimationFrame(() => { reel.style.transform = `translateX(${target}px)`; });
+    setTimeout(() => {
+      clearInterval(interval);
+      reel.style.transition = 'none';
+      renderLuckyFrame(btn, weight, won ? 'card' : 'logo', LUCKY_TARGET_INDEX);
+      reel.classList.remove('lucky-reel-spinning');
+      reel.classList.add(won ? 'lucky-reel-win' : 'lucky-reel-loss');
+      setTimeout(resolve, 500);
+    }, duration + 80);
+  });
+}
+
+document.querySelectorAll('.lucky-btn').forEach(btn => {
+  preloadLuckyAsset(btn.dataset.img || '');
+  btn.addEventListener('click', async () => {
+    _luckyLid = btn.dataset.lid;
+    _luckyPriceCents = parseInt(btn.dataset.priceCents || '0', 10);
+    document.getElementById('luckyName').textContent = btn.dataset.name || 'Card';
+    document.getElementById('luckyPrice').textContent = `Listing price: ${btn.dataset.price || ''}`;
+    const input = document.getElementById('luckyStakeInput');
+    input.value = '5'; input.min = '5';
+    updateLuckyChance();
+    const cardAsset = btn.dataset.img || '';
+    document.getElementById('luckyModal').dataset.luckyButton = btn.dataset.lid;
+    showModal('luckyModal');
+    showLuckyPreview(btn);
+    await preloadLuckyAsset(cardAsset);
+    showLuckyPreview(btn);
+  });
+});
+document.getElementById('luckyStakeInput')?.addEventListener('input', updateLuckyChance);
+document.getElementById('luckyBuyConfirmBtn')?.addEventListener('click', async () => {
+  if (!_luckyLid) return;
+  const input = document.getElementById('luckyStakeInput');
+  const stake = parseFloat(input.value || '0');
+  if (!Number.isFinite(stake) || stake < 5) {
+    showToast('❌ Lucky Buy minimum is $5.00', 'error'); return;
+  }
+  const btn = document.getElementById('luckyBuyConfirmBtn');
+  btn.disabled = true; btn.textContent = 'Trying…';
+  const currentLid = _luckyLid;
+  const sourceBtn = document.querySelector(`.lucky-btn[data-lid="${currentLid}"]`);
+  const res = await apiPost(`/api/lucky-buy/${currentLid}`, {stake});
+  if (res.ok && sourceBtn) {
+    await spinLuckyReel(sourceBtn, Boolean(res.won), Number(res.chance || 0));
+  }
+  if (res.ok && res.won) {
+    closeModal('luckyModal');
+    document.querySelector(`[data-lid="${currentLid}"]`)?.remove();
+    showToast('🎉 Lucky win! The card is now yours.', 'success');
+  } else if (res.ok) {
+    btn.disabled = false; btn.textContent = '☘️ Try Your Luck';
+    document.getElementById('luckyChance').textContent = 'Try Your Luck';
+  } else {
+    showToast(`❌ ${res.error || 'Lucky Buy failed'}`, 'error');
+  }
+  btn.disabled = false;
+  if (!(res.ok && !res.won)) btn.textContent = '☘️ Try Lucky Buy';
+});
+
+document.querySelectorAll('.delist-btn, .admin-delist-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    if (!confirm('Remove this listing? The character will return to the seller.')) return;
+    const lid = btn.dataset.lid;
+    const res = await apiPost(`/api/delist/${lid}`);
+    if (res.ok) {
+      showToast('✅ Listing removed.', 'success');
+      document.querySelector(`[data-lid="${lid}"]`)?.remove();
+    } else {
+      showToast(`❌ ${res.error}`, 'error');
+    }
+  });
+});
+
+{% if wheel_show %}
+/* ── Spin Wheel ─────────────────────────────────────────────────────────── */
+let _wheelPrizes  = [];
+let _wheelSpinning = false;
+const WC_W    = 110;
+const WC_GAP  = 8;
+const WC_SLOT = WC_W + WC_GAP;
+const WC_REP  = 7;
+const WC_ICON  = {coins:'💰', char:'🎭', thanks:'🙏'};
+const WC_COLOR = {coins:'wc-coins', char:'wc-char', thanks:'wc-thanks'};
+const WC_HISTORY_KEY = 'wheel_spin_history';
+const WC_HISTORY_MAX = 10;
+
+function _esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* ── History helpers ── */
+function _loadHistory() {
+  try { return JSON.parse(localStorage.getItem(WC_HISTORY_KEY) || '[]'); }
+  catch(e) { return []; }
+}
+function _saveHistory(entries) {
+  try { localStorage.setItem(WC_HISTORY_KEY, JSON.stringify(entries.slice(0, WC_HISTORY_MAX))); }
+  catch(e) {}
+}
+function _pushHistory(prize, message) {
+  const entries = _loadHistory();
+  entries.unshift({
+    label:   prize.label || '?',
+    type:    prize.type  || '',
+    message: message     || '',
+    ts:      Date.now()
+  });
+  _saveHistory(entries);
+}
+function _fmtAgo(ts) {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60)   return 'just now';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400)return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}
+function renderWheelHistory() {
+  const section = document.getElementById('wheelHistorySection');
+  const list    = document.getElementById('wheelHistoryList');
+  if (!section || !list) return;
+  const entries = _loadHistory();
+  if (!entries.length) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+  list.innerHTML = entries.map(e => `
+    <div class="wh-hist-item">
+      <span class="wh-hist-icon">${WC_ICON[e.type]||'🎁'}</span>
+      <span class="wh-hist-lbl">${_esc(e.label)}</span>
+      <span class="wh-hist-ago">${_fmtAgo(e.ts)}</span>
+    </div>`).join('');
+}
+
+function buildWheelStrip(prizes) {
+  const strip = document.getElementById('wheelStrip');
+  if (!strip) return;
+  if (!prizes || !prizes.length) {
+    strip.innerHTML = '<div style="padding:20px 40px;color:var(--text3);white-space:nowrap;font-size:.85rem;">No prizes yet</div>';
+    return;
+  }
+  let html = '';
+  for (let r = 0; r < WC_REP; r++) {
+    prizes.forEach((p, i) => {
+      html += `<div class="wheel-card ${WC_COLOR[p.type]||''}" data-r="${r}" data-i="${i}">
+        <div class="wheel-card-icon">${WC_ICON[p.type]||'🎁'}</div>
+        <div class="wheel-card-lbl">${_esc(p.label)}</div>
+      </div>`;
+    });
+  }
+  strip.style.transition = 'none';
+  strip.style.transform  = 'translateX(0)';
+  strip.innerHTML = html;
+}
+
+function renderPrizesPreview(prizes) {
+  const grid = document.getElementById('wheelPrizesGrid');
+  if (!grid) return;
+  if (!prizes || !prizes.length) { grid.innerHTML = '<div style="color:var(--text3);font-size:.8rem;grid-column:1/-1;">No prizes configured.</div>'; return; }
+  grid.innerHTML = prizes.map(p => `
+    <div class="prize-prev-item">
+      <div class="prize-prev-icon">${WC_ICON[p.type]||'🎁'}</div>
+      <div class="prize-prev-lbl">${_esc(p.label)}</div>
+      <div class="prize-prev-pct">${p.percent||0}%</div>
+    </div>`).join('');
+}
+
+async function openWheelModal() {
+  try {
+    _wheelSpinning = false;
+    const errEl = document.getElementById('wheelCodeError');
+    const btn   = document.getElementById('wheelSpinBtn');
+    const inp   = document.getElementById('wheelCodeInput');
+    if (errEl) errEl.style.display = 'none';
+    if (btn)   { btn.disabled = false; btn.textContent = '🎰 Spin'; }
+    if (inp)   inp.value = '';
+    showModal('wheelModal');
+    renderWheelHistory();
+    const data = await apiGet('/api/wheel/prizes');
+    _wheelPrizes = (data && data.prizes) ? data.prizes : [];
+    buildWheelStrip(_wheelPrizes);
+    renderPrizesPreview(_wheelPrizes);
+  } catch(e) {
+    console.error('[Wheel] openWheelModal error:', e);
+  }
+}
+
+window.openWheelModal = openWheelModal;
+document.getElementById('openWheelBtn')?.addEventListener('click', openWheelModal);
+
+document.getElementById('wheelSpinBtn')?.addEventListener('click', async () => {
+  if (_wheelSpinning) return;
+  const inp   = document.getElementById('wheelCodeInput');
+  const errEl = document.getElementById('wheelCodeError');
+  const btn   = document.getElementById('wheelSpinBtn');
+  const code  = (inp.value||'').trim().toUpperCase();
+  errEl.style.display = 'none';
+
+  if (!code) {
+    errEl.textContent = '⚠️ Enter a secret code first';
+    errEl.style.display = 'block'; return;
+  }
+  if (!_wheelPrizes.length) {
+    errEl.textContent = '⚠️ No prizes configured';
+    errEl.style.display = 'block'; return;
+  }
+
+  btn.disabled = true; btn.textContent = '⏳ Spinning…'; _wheelSpinning = true;
+  const data = await apiPost('/api/wheel/spin', {code});
+
+  if (!data.ok) {
+    errEl.textContent = data.error || 'Error occurred';
+    errEl.style.display = 'block';
+    btn.disabled = false; btn.textContent = '🎰 Spin'; _wheelSpinning = false;
+    return;
+  }
+
+  buildWheelStrip(_wheelPrizes);
+  const winIdx = data.winner_idx;
+  const winPos = (WC_REP - 2) * _wheelPrizes.length + winIdx;
+  const outer  = document.getElementById('wheelStripOuter');
+  const contW  = outer.offsetWidth;
+  const offset = winPos * WC_SLOT - Math.floor((contW - WC_W) / 2);
+  const strip  = document.getElementById('wheelStrip');
+
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    strip.style.transition = 'transform 4.5s cubic-bezier(0.12, 0.8, 0.15, 1)';
+    strip.style.transform  = `translateX(-${Math.max(0, offset)}px)`;
+  }));
+
+  setTimeout(() => {
+    strip.querySelectorAll('.wheel-card').forEach(c => c.classList.remove('winner'));
+    const cards = strip.querySelectorAll('.wheel-card');
+    if (cards[winPos]) cards[winPos].classList.add('winner');
+    _pushHistory(data.prize, data.message);
+    renderWheelHistory();
+    showToast(data.message || '🎉 Congratulations!', 'success', 5500);
+    setTimeout(() => {
+      btn.disabled = false; btn.textContent = '🎰 Spin';
+      _wheelSpinning = false; inp.value = '';
+    }, 2500);
+  }, 4700);
+});
+{% endif %}
+</script>
+{% endblock %}

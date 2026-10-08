@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Waifu Dashboard{% endblock %}
+{% block content %}
+<div class="dashboard-page">
+  <section class="dashboard-profile">
+    <div class="dashboard-avatar">
+      {% if user and user.photo_url %}<img src="{{ user.photo_url }}" alt="{{ user.first_name }}" loading="eager" onerror="this.onerror=null;this.style.display='none';this.parentElement.textContent='{{ (user.first_name[:1] if user.first_name else 'U')|upper }}';">{% elif user %}{{ user.first_name[:1] | upper }}{% else %}U{% endif %}
+    </div>
+    <div class="dashboard-identity">
+      <h1>{{ user.first_name if user else 'Welcome' }}</h1>
+      <p>{% if user and user.username %}@{{ user.username }}{% else %}Waifu player{% endif %}</p>
+    </div>
+    <div class="dashboard-balance"><strong>{{ balance_str }}</strong></div>
+  </section>
+
+  <div class="dashboard-level"><span>LVL {{ user.level if user else 1 }}</span><div><i style="width:{{ level_progress if user else 12 }}%"></i></div></div>
+
+  {% if welcome_slides %}
+  <section class="dashboard-welcome" aria-label="Welcome">
+    <div class="dashboard-welcome-track">
+      {% for slide in welcome_slides %}<img class="dashboard-welcome-slide{% if loop.first %} is-active{% endif %}" src="{{ slide }}" alt="Welcome">{% endfor %}
+    </div>
+    <span class="dashboard-welcome-label">WELCOME</span>
+    {% if welcome_slides|length > 1 %}<div class="dashboard-dots">{% for slide in welcome_slides %}<i class="{% if loop.first %}is-active{% endif %}"></i>{% endfor %}</div>{% endif %}
+  </section>
+  {% else %}
+  <section class="dashboard-welcome dashboard-welcome-empty"><span>WELCOME</span></section>
+  {% endif %}
+
+  <nav class="dashboard-actions" aria-label="Main actions">
+    <a href="{{ url_for('market') }}" class="dashboard-action"><span>🏪</span><b>Market</b></a>
+    {% if user %}<a href="{{ url_for('wallet') }}" class="dashboard-action"><span>▣</span><b>Wallet</b></a>{% else %}<a href="{{ url_for('index') }}" class="dashboard-action"><span>▣</span><b>Wallet</b></a>{% endif %}
+    <a href="{{ url_for('market') }}" class="dashboard-action"><span>▥</span><b>Cleaning</b></a>
+    <a href="{{ url_for('market') }}" class="dashboard-action"><span>🛒</span><b>Purchase</b></a>
+    <a href="{{ url_for('auction') }}" class="dashboard-action" aria-label="Open Auctions"><span>✎</span><b>Auction</b></a>
+  </nav>
+</div>
+{% endblock %}
+{% block scripts %}
+{% if welcome_slides|length > 1 %}<script>
+(() => {
+  const slides = [...document.querySelectorAll('.dashboard-welcome-slide')];
+  const dots = [...document.querySelectorAll('.dashboard-dots i')]; let current = 0;
+  setInterval(() => { slides[current].classList.remove('is-active'); dots[current]?.classList.remove('is-active'); current=(current+1)%slides.length; slides[current].classList.add('is-active'); dots[current]?.classList.add('is-active'); }, 2000);
+})();
+</script>{% endif %}
+{% endblock %}
+
+{% if not bot_username and not user %}
+<!-- The dashboard remains usable as a visual landing page even before Telegram setup. -->
+{% endif %}

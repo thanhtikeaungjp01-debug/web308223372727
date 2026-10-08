@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Verification — Waifu Market{% endblock %}
+
+{% block content %}
+<section class="verify-page" aria-labelledby="verifyTitle">
+  <div class="verify-card">
+    <div class="verify-mark" aria-hidden="true">✓</div>
+    <h1 id="verifyTitle">I’m not a robot</h1>
+    <p class="verify-subtitle">Please confirm that you are a real visitor before entering Waifu Market.</p>
+
+    {% if error %}
+    <div class="alert alert-error" role="alert">❌ {{ error }}</div>
+    {% endif %}
+
+    <form method="post" class="verify-form">
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <input type="hidden" name="challenge" value="{{ challenge }}">
+      <div class="verify-checkbox-row" id="robotCheckRow" role="checkbox" tabindex="0" aria-checked="false">
+        <input type="checkbox" id="robotCheck" name="robot_check" required>
+        <span class="verify-checkbox-ui" aria-hidden="true"></span>
+        <span class="verify-checkbox-text">I’m not a robot</span>
+      </div>
+      <button class="btn btn-primary verify-submit" id="verifySubmit" type="submit" disabled>Continue to Web</button>
+    </form>
+
+    <p class="verify-note">For security, this check is required again each time you freshly enter the website.</p>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (() => {
+  const row = document.getElementById('robotCheckRow');
+  const check = document.getElementById('robotCheck');
+  const submit = document.getElementById('verifySubmit');
+  if (!row || !check || !submit) return;
+
+  const sync = () => {
+    submit.disabled = !check.checked;
+    row.setAttribute('aria-checked', String(check.checked));
+  };
+  check.addEventListener('change', sync);
+
+  // Handle the whole row ourselves. The hidden native input is not allowed to
+  // receive pointer events, which prevents Telegram WebView from applying the
+  // label's default toggle in addition to this handler.
+  row.addEventListener('click', (event) => {
+    event.preventDefault();
+    check.checked = !check.checked;
+    sync();
+  });
+  row.addEventListener('keydown', (event) => {
+    if (event.key !== ' ' && event.key !== 'Enter') return;
+    event.preventDefault();
+    check.checked = !check.checked;
+    sync();
+  });
+  sync();
+})();
+</script>
+{% endblock %}
