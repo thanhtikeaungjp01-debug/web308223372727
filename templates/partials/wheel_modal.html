@@ -1,0 +1,38 @@
+<!-- Spin Wheel Modal -->
+<div class="modal-overlay" id="wheelModal" style="display:none;z-index:9995">
+  <div class="modal wheel-modal">
+    <button class="wheel-modal-close" onclick="closeModal('wheelModal')">✕</button>
+    <div class="wheel-modal-title">🎡 Free Spin</div>
+
+    <div class="wheel-strip-wrap">
+      <div class="wheel-strip-pointer-top"></div>
+      <div class="wheel-strip-pointer-bottom"></div>
+      <div class="wheel-strip-outer" id="wheelStripOuter">
+        <div class="wheel-strip-inner" id="wheelStrip">
+          <div style="padding:20px 40px;color:var(--text3);font-size:.85rem;white-space:nowrap;">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wheel-modal-body">
+      <div class="wheel-code-error" id="wheelCodeError" style="display:none"></div>
+      <div class="wheel-code-hint">ℹ️ Enter a secret code to spin</div>
+      <input type="text" id="wheelCodeInput" class="form-input wheel-code-input"
+             placeholder="Enter secret code…" autocomplete="off" autocorrect="off"
+             spellcheck="false" style="text-transform:uppercase;letter-spacing:2px;">
+      <button class="btn btn-primary wheel-spin-btn" id="wheelSpinBtn">🎰 Spin</button>
+
+      <div class="wheel-history-section" id="wheelHistorySection" style="display:none">
+        <div class="wheel-prizes-title">🕐 Last 10 Spins:</div>
+        <div class="wheel-history-list" id="wheelHistoryList"></div>
+      </div>
+
+      <div class="wheel-prizes-section">
+        <div class="wheel-prizes-title">Possible prizes:</div>
+        <div class="wheel-prizes-grid" id="wheelPrizesGrid">
+          <div style="color:var(--text3);font-size:.8rem;grid-column:1/-1;padding:8px 0;">Loading…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

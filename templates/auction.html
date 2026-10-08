@@ -3,24 +3,46 @@
 {% block content %}
 <div class="page-header auction-header">
   <a href="{{ url_for('index') }}" class="btn btn-ghost btn-sm auction-back">‹ Back</a>
-  <h1 class="page-title">🔨 Auction <span class="badge-count">{{ auctions|length }}</span></h1>
+  <h1 class="page-title">🔨 Auction <span class="badge-count">{{ wins|length if tab == 'wins' else auctions|length }}</span></h1>
   <p class="page-subtitle">List one card per day or bid on another player's card</p>
 </div>
+<nav class="auction-tabs" aria-label="Auction views">
+  {% for key, title in [('active', 'All auctions'), ('bids', 'My bids'), ('wins', 'Won')] %}
+  <a href="{{ url_for('auction', tab=key) }}"{% if tab == key %} aria-current="page"{% endif %}>{{ title }}</a>
+  {% endfor %}
+</nav>
+{% if tab == 'active' %}
 <section class="auction-intro card">
   <div><strong>Daily auction rule</strong><p>Each user can list <b>1 card per day</b>. Auctions last 24 hours. Your bid is reserved; if another player outbids you, your dollars return automatically.</p></div>
   <a class="btn btn-primary" href="{{ url_for('harem') }}">🃏 List from Harem</a>
 </section>
 <section class="card auction-prices"><strong>Starting price (half of card reference price)</strong><div class="auction-price-grid">{% for rarity, cents in auction_floors.items() %}<span>{{ rarity }} <b>{{ "%.2f"|format(cents / 100) }}$</b></span>{% endfor %}</div></section>
-{% if auctions %}
+{% endif %}
+{% if tab == 'wins' %}
+<p class="page-subtitle auction-history-note">Your latest 10 wins stay here. Older wins are removed when you win again. Ended bids you did not win leave My bids automatically.</p>
+{% if wins %}<div class="card-grid auction-grid">
+{% for win in wins %}
+<article class="char-card auction-card">
+  <div class="char-img-wrap">
+    {% if win.char_video %}<video src="{{ win.char_video }}" class="char-img char-video" controls playsinline preload="none"{% if win.char_img %} poster="{{ win.char_img }}"{% endif %}></video>
+    {% else %}<img src="{{ win.char_img }}" alt="{{ win.char.name }}" class="char-img" decoding="async" loading="{{ 'eager' if loop.index <= 2 else 'lazy' }}" onerror="this.onerror=null;this.src='/static/img/card-placeholder.svg';">{% endif %}
+    <span class="auction-result">✓ Won</span>
+  </div>
+  <div class="char-info"><div class="char-name">{{ win.char.name }}</div><div class="char-anime">{{ win.char.anime }}</div><div class="listing-meta"><span>{{ win.ago }}</span><strong>{{ win.price_str }}</strong></div></div>
+</article>
+{% endfor %}</div>
+{% else %}<div class="empty-state"><div class="empty-icon">🏆</div><div class="empty-title">Your wins will appear here</div><div class="empty-desc">Win an auction to add a card to your history.</div></div>{% endif %}
+{% elif auctions %}
 <div class="card-grid auction-grid">
 {% for lst in auctions %}
   <article class="char-card auction-card" data-lid="{{ lst._id_str }}">
     <div class="char-img-wrap">
-      {% if lst.char_video %}<video src="{{ lst.char_video }}" class="char-img char-video" controls playsinline preload="metadata" {% if lst.char_img %}poster="{{ lst.char_img }}"{% endif %}></video>
-      {% else %}<img src="{{ lst.char_img }}" alt="{{ lst.char.name }}" class="char-img" loading="lazy" onerror="this.onerror=null;this.src='/static/img/card-placeholder.svg';">{% endif %}
+      {% if lst.char_video %}<video src="{{ lst.char_video }}" class="char-img char-video" controls playsinline preload="none" {% if lst.char_img %}poster="{{ lst.char_img }}"{% endif %}></video>
+      {% else %}<img src="{{ lst.char_img }}" alt="{{ lst.char.name }}" class="char-img" decoding="async" loading="{{ 'eager' if loop.index <= 2 else 'lazy' }}" onerror="this.onerror=null;this.src='/static/img/card-placeholder.svg';">{% endif %}
       <div class="rarity-badge">{{ lst.char.rarity }}</div>
     </div>
-    <div class="char-info"><div class="char-name">{{ lst.char.name }}</div><div class="char-anime">{{ lst.char.anime }}</div><div class="listing-meta"><span>👤 {{ lst.seller_name }}</span><span>⏱ 24h</span></div></div>
+    <div class="char-info"><div class="char-name">{{ lst.char.name }}</div><div class="char-anime">{{ lst.char.anime }}</div><div class="listing-meta"><span>👤 {{ lst.seller_name }}</span><time class="auction-deadline" data-ends="{{ lst.ends_at }}">Ending soon</time></div></div>
+    {% if tab == 'bids' %}<p class="auction-bid-status {{ 'is-leading' if lst.highest_bid and lst.highest_bid.bidder_id == user.id else '' }}">{{ 'You are leading' if lst.highest_bid and lst.highest_bid.bidder_id == user.id else 'Outbid · reserved funds returned' }}</p>{% endif %}
     <div class="card-footer"><div class="price-tag">🔨 {{ lst.bid_str }}<small> / min {{ lst.price_str }}</small></div>
       {% if is_owner %}<button class="btn btn-danger btn-sm auction-delete-btn" data-lid="{{ lst._id_str }}">🗑 Delete</button>
       {% elif user.id != lst.seller_id %}<button class="btn btn-primary btn-sm auction-bid-btn" data-lid="{{ lst._id_str }}" data-name="{{ lst.char.name }}" data-min="{{ lst.price_str }}" data-bid="{{ lst.bid_str }}">🔨 Bid</button>
@@ -30,14 +52,40 @@
 {% endfor %}
 </div>
 {% else %}
-<div class="empty-state"><div class="empty-icon">🔨</div><div class="empty-title">No active auctions</div><div class="empty-desc">Be the first to list a card today.</div><a class="btn btn-primary" href="{{ url_for('harem') }}">List a Card</a></div>
+<div class="empty-state"><div class="empty-icon">🔨</div><div class="empty-title">{{ 'No current bids' if tab == 'bids' else 'No active auctions' }}</div><div class="empty-desc">{{ 'Your open auction bids appear here until the auction ends.' if tab == 'bids' else 'Be the first to list a card today.' }}</div><a class="btn btn-primary" href="{{ url_for('harem') }}">List a Card</a></div>
 {% endif %}
+<nav class="pagination" aria-label="Auction pages">
+  {% if page > 1 %}<a class="btn btn-ghost btn-sm" href="{{ url_for('auction', tab=tab, page=page-1) }}">← Previous</a>{% endif %}
+  <span>Page {{ page }}</span>
+  {% if has_next %}<a class="btn btn-ghost btn-sm" href="{{ url_for('auction', tab=tab, page=page+1) }}">Next →</a>{% endif %}
+</nav>
 <style>
+.auction-tabs{display:flex;gap:6px;padding:5px;background:var(--bg2);border:1px solid var(--border);border-radius:14px;margin:0 0 20px}.auction-tabs a{flex:1;text-align:center;padding:12px 8px;border-radius:10px;color:var(--text2);font-size:.85rem}.auction-tabs a[aria-current]{background:var(--bg3);color:var(--text);box-shadow:0 2px 8px #0002}.auction-result{position:absolute;top:12px;left:12px;background:#153e31;color:#bcf4d4;padding:7px 12px;border-radius:10px;font-weight:700;font-size:.8rem}.auction-bid-status{padding:8px 14px;font-size:.75rem;color:var(--text2)}.auction-bid-status.is-leading{color:#58bd90}.auction-history-note{margin-bottom:20px}
+
 .auction-header{position:relative}.auction-back{position:absolute;right:0;top:-10px}.auction-intro{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px;padding:16px 18px;border-color:rgba(255,190,88,.35);background:linear-gradient(135deg,rgba(102,46,25,.3),rgba(54,31,91,.35))}.auction-intro p{margin:5px 0 0;color:var(--text2);font-size:.82rem;line-height:1.5}.auction-intro strong{color:#ffe28a}.auction-prices{margin-bottom:20px;padding:14px 16px;border-color:rgba(255,190,88,.28)}.auction-price-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 18px;margin-top:10px;color:var(--text2);font-size:.78rem}.auction-price-grid b{float:right;color:#ffe28a}.auction-card{border-color:rgba(255,190,88,.32)}.auction-card .price-tag{color:#ffe28a}.auction-card .price-tag small{display:block;color:var(--text3);font-size:.68rem}@media(max-width:600px){.auction-intro{align-items:flex-start;flex-direction:column}.auction-intro .btn{width:100%}.auction-price-grid{grid-template-columns:1fr}}
 </style>
 {% endblock %}
 {% block scripts %}
 <script>
+const deadlines = [...document.querySelectorAll('.auction-deadline')];
+let refreshedAfterEnd = false;
+const refreshEnded = () => {
+  if (!document.hidden && !refreshedAfterEnd && deadlines.some(label => Number(label.dataset.ends) <= Date.now() / 1000)) {
+    refreshedAfterEnd = true;
+    location.reload();
+  }
+};
+const updateDeadlines = () => deadlines.forEach(label => {
+  const seconds = Math.max(0, Math.ceil(Number(label.dataset.ends) - Date.now() / 1000));
+  label.textContent = seconds ? `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m left` : 'Ended · refresh for result';
+});
+updateDeadlines();
+if (deadlines.length) {
+  setInterval(() => { if (!document.hidden) updateDeadlines(); }, 30000);
+  const nextEnd = Math.min(...deadlines.map(label => Number(label.dataset.ends)));
+  setTimeout(refreshEnded, Math.min(2147483647, Math.max(0, nextEnd * 1000 - Date.now() + 250)));
+  document.addEventListener('visibilitychange', refreshEnded);
+}
 document.querySelectorAll('.auction-bid-btn').forEach(btn => btn.addEventListener('click', async () => {
   const amount = prompt(`Bid for ${btn.dataset.name}. Minimum: ${btn.dataset.bid === 'No bids' ? btn.dataset.min : 'higher than ' + btn.dataset.bid} ($)`, '');
   if (amount === null) return;

@@ -33,7 +33,7 @@ MongoDB Atlas **Network Access** မှာ Vercel function က ချိတ်�
 - Existing server ရဲ့ `data/config.json` ကို Vercel ဆီ အလိုအလျောက် မကူးပါ။ Credentials ကို env ထဲထည့်ပြီး Appearance/settings ကို owner panel ကနေ ပြန်သိမ်းပါ။ Existing Mongo logo/user data ကို ဆက်သုံးပါတယ်။
 - Cold start/redeploy က maintenance mode ကို မပြောင်းပါ။ MongoDB မရရင် local JSON ထဲ fallback မရေးပါ။
 - Static CSS/JS/images ကို build က `public/static` ဆီကူးပြီး Vercel CDN ကပို့ပါတယ်။ Telegram media cache က `/tmp` မှာ 128 MiB အထိသာထားတဲ့ ယာယီ cache ဖြစ်ပါတယ်။
-- Vercel ရဲ့ 4.5 MB request/response limit အတွက် **upload တစ်ဖိုင် 4 MiB အထိ** သာခွင့်ပြုပါတယ်။ Logo/welcome/ad upload UI က ကြိုစစ်ပေးပါတယ်။ Proxied Telegram media 4 MiB ကျော်ရင် placeholder ပြပါတယ်။ ကြီးတဲ့ video တွေကို ဒီ proxy မှာ တိုက်ရိုက်မပို့နိုင်ပါ။
+- Vercel ရဲ့ 4.5 MB request/response limit အတွက် **upload တစ်ဖိုင် 4 MiB အထိ** သာခွင့်ပြုပါတယ်။ Logo/welcome/ad upload UI က ကြိုစစ်ပေးပါတယ်။ Thumbnail ပြောင်းမည့် raster image ကို upstream မှ 12 MiB အထိဖတ်ပြီး ချုံ့ပါတယ်။ နောက်ဆုံး response နဲ့ video က 4 MiB ကျော်ရင် placeholder ပြပါတယ်။ ကြီးတဲ့ video တွေကို ဒီ proxy မှာ တိုက်ရိုက်မပို့နိုင်ပါ။
 - Bot process ကို Vercel မှာ မ run ပါ။ အခု repo က mini app ဖြစ်ပြီး bot က လက်ရှိ host မှာ ဆက် run ရပါမယ်။
 
 Official deployment references: [Flask on Vercel](https://vercel.com/docs/frameworks/backend/flask), [Python runtime](https://vercel.com/docs/functions/runtimes/python), [Function limits](https://vercel.com/docs/functions/limitations).
@@ -89,8 +89,37 @@ The authentication tests use signed synthetic Telegram data and temporary local 
 
 As the configured owner, open **Admin → Appearance**. Under **Mini App Branding**, edit **App name** (up to 40 characters) and **Subtitle** (up to 64 characters), then select **Save Branding**. A blank subtitle hides the second line.
 
-Under **Site Logo**, upload a PNG, JPEG, GIF or WebP photo (up to 4 MiB on Vercel, 5 MiB on a persistent server). It appears beside the name on Home; **Remove** restores the default icon. Logos are resized to 512 pixels or smaller and browsers revalidate them so replacing a logo shows the latest image. Text is stored in the existing runtime configuration and the logo in the existing database settings.
+Under **Site Logo**, upload a PNG, JPEG, GIF or WebP photo (up to 4 MiB on Vercel, 5 MiB on a persistent server). It appears beside the name on Home; **Remove** restores the default icon. Logos are resized to 512 pixels or smaller. Content fingerprints in media URLs let browsers cache unchanged logos; replacing a logo produces a new URL. Text is stored in the existing runtime configuration and the logo in the existing database settings.
 
 ## Display preferences
 
 Open the three-dot menu on Home to select **Small / Large** and **Dark / Light / Blue**. Both choices persist on that browser/device and apply across pages. Large also expands Telegram and requests fullscreen on supported Telegram 8.0+ clients; Small exits fullscreen and uses a compact layout. Older clients support expansion only: Telegram does not expose a collapse API, so reducing its window requires a swipe. Fullscreen is requested only after a button press; a reload restores the layout preference.
+
+
+## Loading, images and advertisements
+
+- Card photos use same-origin `/media/<token>?w=640` thumbnails: non-animated raster images become WebP, at most 640 pixels on either edge. Animated GIF/WebP and video remain animated; videos load on demand.
+- Telegram file IDs use stable URLs with a 30-day browser/CDN cache. Logo, welcome and uploaded ad URLs include a content fingerprint, so changing an upload changes its URL. External mutable image URLs refresh after five minutes.
+- Repeat visits can reuse downloaded image bytes. First visits still download; browser storage eviction, clearing cache, or private browsing can require another download. Vercel's bounded 128 MiB `/tmp` cache is temporary and may disappear on cold starts; browser/CDN caching reduces dependence on it.
+- Only public display metadata is cached in memory for 15 seconds. Owner edits invalidate the local cache immediately; another instance can take up to 15 seconds to reflect them. Balances, bids, sessions and transaction history remain fresh.
+- Market views are batched for visible cards. Page navigation uses native links, a progress indicator and supported-browser view transitions. Large auction lists are paginated, 24 entries per page.
+- The Market advertisement is an inline **Community spotlight** card. It loads near the viewport, supports a destination link, and remembers dismissal for that ad during the browser session. Ad videos do not autoplay.
+- If Market shows Maintenance, the owner must disable **Admin → Maintenance** (and remove a `MAINTENANCE_MODE=1` environment override if set). Public welcome/ad media remain available during maintenance.
+
+For best hosted latency, place Vercel functions near the Atlas database. On large databases, have the database administrator inspect indexes for `market_listings` (`listing_type`, `ends_at`) and transaction history (`type`, `from_id`, `ts`) before adding them. This change does not create indexes or run a data migration.
+
+## Auction history
+
+Open **Auction → My bids** for current participation and leading/outbid status; **Won** keeps your latest 10 completed wins. At expiry, the displayed auction page refreshes once: ended bids leave My bids, and settled wins appear in Won. Up to 25 expired auctions settle per page visit, so a large backlog can take multiple visits.
+
+Winning history uses existing `auction_sale` transaction records. When a new auction win is recorded, older `auction_sale` records beyond the winner’s latest ten are deleted. The deletion is restricted to that winner and those older records; other transaction types, users, owned cards and balances are untouched. Existing older wins are hidden immediately and pruned on the next win. Wallet displays its latest ten transactions. Already-deleted historical transactions cannot be recovered by this update. Participant tracking starts with bids placed after this update; legacy auctions still show the current highest bidder, but earlier outbid participants may have no stored record. Filtering losing bids from the UI does not delete users, balances or unrelated MongoDB records.
+
+Focused synthetic checks: `PYTHONPATH=. python scripts/test_loading_history.py`.
+
+
+Rocket, Update and Wheel appear beneath Home's four main action buttons when their owner visibility switches are enabled. Wheel opens its existing spin modal there. Market lists only fixed-price cards (including legacy listings without a type); Auction lists only auctions. Direct Market purchase/Lucky Buy requests also reject auction cards.
+
+
+## Welcome slideshow
+
+In **Admin → Appearance → Welcome Images**, select several photos and upload them (up to five stored photos). Home automatically slides every three seconds when there are at least two photos and loops back to the first. A single photo stays still. The dots indicate the current photo. There are no manual slide or pause controls. Rotation waits while the page is hidden or the banner is off screen, then resumes when visible. Reduced-motion devices use instant transitions. Existing uploaded photos are preserved; remove one before adding more if the list is full.

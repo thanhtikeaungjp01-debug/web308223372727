@@ -1,0 +1,17 @@
+{% if ad_banner_url %}
+<aside class="ad-mini-banner" id="adBanner" aria-label="Featured advertisement" data-ad-key="{{ ad_banner_url }}">
+  <div class="ad-mini-heading"><div><span class="ad-mini-label">SPONSORED</span><strong>Community spotlight</strong></div><button class="ad-mini-close" id="adBannerClose" type="button" aria-label="Dismiss advertisement">×</button></div>
+  {% set ad_path = ad_banner_url.split('?')[0].lower() %}
+  {% set video = ad_banner_is_video or ad_path.endswith(('.mp4', '.webm', '.mov', '.m4v', '.ogv')) %}
+  <div class="ad-mini-frame">
+    {% if video %}
+    <video class="ad-mini-media" data-src="{{ ad_banner_url }}" controls playsinline preload="none" aria-label="Featured advertisement video"></video>
+    {% else %}
+    {% if config.AD_BANNER_LINK %}<a href="{{ config.AD_BANNER_LINK }}" target="_blank" rel="noopener noreferrer sponsored" class="ad-mini-link" aria-label="View featured offer">{% endif %}
+    <img class="ad-mini-media" data-src="{{ ad_banner_url }}" alt="Featured community offer" width="960" height="420" decoding="async" loading="lazy">
+    {% if config.AD_BANNER_LINK %}</a>{% endif %}
+    {% endif %}
+  </div>
+  {% if config.AD_BANNER_LINK %}<a class="ad-mini-cta" href="{{ config.AD_BANNER_LINK }}" target="_blank" rel="noopener noreferrer sponsored">View offer <span aria-hidden="true">↗</span></a>{% endif %}
+</aside>
+{% endif %}

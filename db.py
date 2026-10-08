@@ -5,6 +5,7 @@ Config is read dynamically from config_store (env vars > data/config.json).
 """
 from __future__ import annotations
 import json
+import hashlib
 import os
 import random
 import re
@@ -12,6 +13,10 @@ import time
 import uuid
 from pathlib import Path
 from threading import RLock
+try:
+    from web.display_cache import invalidate_display
+except ModuleNotFoundError:
+    from display_cache import invalidate_display
 
 # ── rarity constants ──────────────────────────────────────────────────────────
 
@@ -103,13 +108,23 @@ def _ago(ts: float) -> str:
     return f"{delta // 86400}d ago"
 
 
+def _media_metadata(item):
+    if not item:
+        return None
+    metadata = {k: v for k, v in item.items() if k != "data"}
+    if not metadata.get("version") and item.get("data"):
+        metadata["version"] = hashlib.sha256(item["data"].encode()).hexdigest()
+    return metadata
+
+
 # ── MongoDB backend ────────────────────────────────────────────────────────────
 
 class MongoWebDB:
     def __init__(self, mongo_uri: str, db_name: str):
         from pymongo import MongoClient, DESCENDING
         self._DESC = DESCENDING
-        self._client = MongoClient(mongo_uri, serverSelectionTimeoutMS=6000)
+        self._client = MongoClient(mongo_uri, serverSelectionTimeoutMS=6000,
+                                   connectTimeoutMS=5000, socketTimeoutMS=10000, maxPoolSize=10)
         mdb = self._client[db_name]
         self._users    = mdb["users"]
         self._market   = mdb["market_listings"]
@@ -124,7 +139,6 @@ class MongoWebDB:
         self._card_update = mdb["card_update_config"]
         self._rarity_quota = mdb["rarity_quota"]
         self._card_update_usage = mdb["card_update_usage"]
-        self._client.admin.command("ping")
 
     def get_user(self, user_id: int):
         return self._users.find_one({"id": user_id})
@@ -198,8 +212,12 @@ class MongoWebDB:
         username = username.lstrip("@")
         return self._users.find_one({"username": {"$regex": f"^{re.escape(username)}$", "$options": "i"}})
 
-    def get_listings(self, skip=0, limit=20, rarity=None, search=None) -> list:
+    def get_listings(self, skip=0, limit=20, rarity=None, search=None, listing_type=None) -> list:
         filt: dict = {}
+        if listing_type == "fixed":
+            filt["listing_type"] = {"$in": ["fixed", None]}
+        elif listing_type:
+            filt["listing_type"] = listing_type
         if rarity:
             filt["char.rarity"] = rarity
         if search:
@@ -209,8 +227,12 @@ class MongoWebDB:
             ]
         return list(self._market.find(filt).sort("listed_at", self._DESC).skip(skip).limit(limit))
 
-    def count_listings(self, rarity=None, search=None) -> int:
+    def count_listings(self, rarity=None, search=None, listing_type=None) -> int:
         filt: dict = {}
+        if listing_type == "fixed":
+            filt["listing_type"] = {"$in": ["fixed", None]}
+        elif listing_type:
+            filt["listing_type"] = listing_type
         if rarity:
             filt["char.rarity"] = rarity
         if search:
@@ -248,6 +270,28 @@ class MongoWebDB:
         except Exception:
             return self._market.find_one_and_delete({"_id": listing_id})
 
+    def get_auctions(self, now, skip=0, limit=24, bidder_id=None, expired=False):
+        query = {"listing_type": "auction", "ends_at": {"$lte" if expired else "$gt": now}}
+        if bidder_id is not None:
+            query["$or"] = [{"highest_bid.bidder_id": bidder_id}, {"bidder_ids": bidder_id}]
+        return list(self._market.find(query).sort("ends_at", 1).skip(skip).limit(limit))
+
+    def get_auction_wins(self, user_id, skip=0, limit=10):
+        limit = min(limit, max(0, 10 - skip))
+        if limit <= 0:
+            return []
+        return list(self._tx.find({"type": "auction_sale", "from_id": user_id})
+                    .sort("ts", self._DESC).skip(skip).limit(limit))
+
+    def increment_listing_views_many(self, listing_ids):
+        from bson import ObjectId
+        ids = [ObjectId(value) if ObjectId.is_valid(value) else value for value in set(listing_ids)]
+        self._market.update_many({"_id": {"$in": ids}}, {"$inc": {"views": 1}})
+
+    def get_user_names(self, user_ids):
+        return {doc["id"]: doc for doc in self._users.find(
+            {"id": {"$in": list(user_ids)}}, {"id": 1, "first_name": 1, "username": 1})}
+
     def get_user_listings(self, user_id: int) -> list:
         return list(self._market.find({"seller_id": user_id}).sort("listed_at", self._DESC))
 
@@ -270,6 +314,8 @@ class MongoWebDB:
             return {"ok": False, "error": "Invalid listing ID"}
         if not listing:
             return {"ok": False, "error": "Listing not found"}
+        if (listing.get("listing_type") or "fixed") != "fixed":
+            return {"ok": False, "error": "Use Auction to bid on this card"}
         if listing["seller_id"] == buyer_id:
             return {"ok": False, "error": "Cannot buy your own listing"}
         price = listing["price"]
@@ -288,8 +334,8 @@ class MongoWebDB:
 
     def _update_listing_auction(self, listing_id: str, bid: dict):
         from bson import ObjectId
-        try: self._market.update_one({"_id": ObjectId(listing_id)}, {"$set": {"highest_bid": bid}})
-        except Exception: self._market.update_one({"_id": listing_id}, {"$set": {"highest_bid": bid}})
+        try: self._market.update_one({"_id": ObjectId(listing_id)}, {"$set": {"highest_bid": bid}, "$addToSet": {"bidder_ids": bid["bidder_id"]}})
+        except Exception: self._market.update_one({"_id": listing_id}, {"$set": {"highest_bid": bid}, "$addToSet": {"bidder_ids": bid["bidder_id"]}})
     def place_bid(self, listing_id: str, bidder_id: int, bidder_name: str, amount: int) -> dict:
         listing = self.get_listing(listing_id)
         if not listing or listing.get("listing_type", "fixed") != "auction":
@@ -344,6 +390,8 @@ class MongoWebDB:
         listing = self._market.find_one({"_id": oid})
         if not listing:
             return {"ok": False, "error": "Listing not found"}
+        if (listing.get("listing_type") or "fixed") != "fixed":
+            return {"ok": False, "error": "Use Auction to bid on this card"}
         if listing.get("seller_id") == buyer_id:
             return {"ok": False, "error": "Cannot lucky-buy your own listing"}
         price = int(listing.get("price", 0))
@@ -380,6 +428,8 @@ class MongoWebDB:
 
     def claim_presence(self, presence_id: str, user_id: int, max_users: int = 8, ttl: int = 45) -> bool:
         from pymongo import ReturnDocument
+        if self.touch_presence(presence_id, ttl):
+            return True
         now = time.time()
         for index in range(max_users):
             slot_id = f"slot-{index}"
@@ -405,7 +455,7 @@ class MongoWebDB:
             {"presence_id": presence_id, "active": True, "expires_at": {"$gte": now}},
             {"$set": {"expires_at": now + ttl}},
         )
-        return bool(result.modified_count)
+        return bool(result.matched_count)
 
     def release_presence(self, presence_id: str) -> None:
         self._presence.update_many({"presence_id": presence_id}, {"$set": {"active": False, "expires_at": 0}})
@@ -437,18 +487,12 @@ class MongoWebDB:
             "details": details or {},
             "ts":      time.time(),
         })
-        # keep only last 10 per user — prune older ones
-        for uid in set(filter(None, [from_id, to_id])):
-            ids_to_keep = [
-                d["_id"] for d in
-                self._tx.find({"$or": [{"from_id": uid}, {"to_id": uid}]},
-                              {"_id": 1}).sort("ts", self._DESC).limit(10)
-            ]
-            if ids_to_keep:
-                self._tx.delete_many({
-                    "$or": [{"from_id": uid}, {"to_id": uid}],
-                    "_id": {"$nin": ids_to_keep},
-                })
+        if tx_type == "auction_sale":
+            older = list(self._tx.find({"type": "auction_sale", "from_id": from_id}, {"_id": 1})
+                         .sort([("ts", -1), ("_id", -1)]).skip(10))
+            if older:
+                self._tx.delete_many({"type": "auction_sale", "from_id": from_id,
+                                      "_id": {"$in": [row["_id"] for row in older]}})
 
     def get_transactions(self, user_id: int, limit=10) -> list:
         return list(
@@ -485,6 +529,27 @@ class MongoWebDB:
         keys = (doc or {}).get("keys", [])
         return any(k["key"] == key for k in keys)
 
+    def get_profile(self, user_id: int):
+        return self._users.find_one({"id": user_id}, {"characters": 0, "favorites": 0})
+
+    def get_public_media(self):
+        docs = {doc["_id"]: doc for doc in self._settings.find(
+            {"_id": {"$in": ["site_logo", "ad_banner", "welcome_slides"]}},
+            {"data": 0, "slides.data": 0})}
+        # Legacy uploads have no fingerprint. Derive it read-only once per
+        # display-cache fill; never rewrite shared bot settings during a GET.
+        legacy = [key for key, doc in docs.items() if
+                  (key != "welcome_slides" and not doc.get("version")) or
+                  (key == "welcome_slides" and any(not slide.get("version") for slide in doc.get("slides", [])))]
+        if legacy:
+            for doc in self._settings.find({"_id": {"$in": legacy}}):
+                if doc["_id"] == "welcome_slides":
+                    docs[doc["_id"]] = {"slides": [_media_metadata(slide) for slide in doc.get("slides", [])]}
+                else:
+                    docs[doc["_id"]] = _media_metadata(doc)
+        return {"logo": docs.get("site_logo"), "ad": docs.get("ad_banner"),
+                "slides": docs.get("welcome_slides", {}).get("slides", [])}
+
     def get_logo(self, include_data=True) -> dict | None:
         if not include_data:
             return self._settings.find_one({"_id": "site_logo", "data": {"$exists": True, "$ne": ""}}, {"mime": 1})
@@ -493,25 +558,34 @@ class MongoWebDB:
             return {"data": doc["data"], "mime": doc.get("mime", "image/jpeg")}
         return None
 
+    @invalidate_display
     def set_logo(self, data_b64: str, mime: str) -> None:
         self._settings.update_one(
             {"_id": "site_logo"},
-            {"$set": {"data": data_b64, "mime": mime}},
+            {"$set": {"data": data_b64, "mime": mime, "version": hashlib.sha256(data_b64.encode()).hexdigest()}},
             upsert=True,
         )
 
+    @invalidate_display
     def delete_logo(self) -> None:
         self._settings.delete_one({"_id": "site_logo"})
+
+    def get_welcome_slide(self, index):
+        doc = self._settings.find_one({"_id": "welcome_slides"}, {"slides": {"$slice": [index, 1]}}) or {}
+        return doc.get("slides", [])[0]
 
     def get_welcome_slides(self, include_data=True) -> list:
         doc = self._settings.find_one({"_id": "welcome_slides"}, None if include_data else {"slides.data": 0})
         return (doc or {}).get("slides", [])
 
+    @invalidate_display
     def set_welcome_slides(self, slides: list) -> None:
+        slides = [dict(slide, version=hashlib.sha256(slide["data"].encode()).hexdigest()) for slide in slides]
         self._settings.update_one(
             {"_id": "welcome_slides"}, {"$set": {"slides": slides}}, upsert=True
         )
 
+    @invalidate_display
     def delete_welcome_slide(self, index: int) -> None:
         slides = self.get_welcome_slides()
         if 0 <= index < len(slides):
@@ -538,13 +612,15 @@ class MongoWebDB:
             return {"data": doc["data"], "mime": doc.get("mime", "image/jpeg")}
         return None
 
+    @invalidate_display
     def set_ad_banner(self, data_b64: str, mime: str) -> None:
         self._settings.update_one(
             {"_id": "ad_banner"},
-            {"$set": {"data": data_b64, "mime": mime}},
+            {"$set": {"data": data_b64, "mime": mime, "version": hashlib.sha256(data_b64.encode()).hexdigest()}},
             upsert=True,
         )
 
+    @invalidate_display
     def delete_ad_banner(self) -> None:
         self._settings.delete_one({"_id": "ad_banner"})
 
@@ -562,12 +638,14 @@ class MongoWebDB:
         doc = self._wheel.find_one({"_id": "config"})
         return bool((doc or {}).get("show", False))
 
+    @invalidate_display
     def set_wheel_show(self, show: bool) -> None:
         self._wheel.update_one({"_id": "config"}, {"$set": {"show": bool(show)}}, upsert=True)
 
     def get_card_update_show(self) -> bool:
         return bool((self._card_update.find_one({"_id": "config"}) or {}).get("show", False))
 
+    @invalidate_display
     def set_card_update_show(self, show: bool) -> None:
         self._card_update.update_one({"_id": "config"}, {"$set": {"show": bool(show)}}, upsert=True)
 
@@ -668,6 +746,7 @@ class MongoWebDB:
 
     def get_rocket_show(self) -> bool:
         return bool((self._rocket.find_one({"_id": "config"}) or {}).get("show", False))
+    @invalidate_display
     def set_rocket_show(self, show: bool) -> None:
         self._rocket.update_one({"_id": "config"}, {"$set": {"show": bool(show)}}, upsert=True)
     def get_rocket_pool(self) -> int:
@@ -833,8 +912,10 @@ class LocalWebDB:
         items.sort(key=lambda x: x.get("listed_at", 0), reverse=True)
         return items
 
-    def get_listings(self, skip=0, limit=20, rarity=None, search=None) -> list:
+    def get_listings(self, skip=0, limit=20, rarity=None, search=None, listing_type=None) -> list:
         items = self._all_listings()
+        if listing_type:
+            items = [i for i in items if (i.get("listing_type") or "fixed") == listing_type]
         if rarity:
             items = [i for i in items if i.get("char", {}).get("rarity") == rarity]
         if search:
@@ -844,8 +925,8 @@ class LocalWebDB:
                      s in i.get("char", {}).get("anime", "").lower()]
         return items[skip:skip + limit]
 
-    def count_listings(self, rarity=None, search=None) -> int:
-        return len(self.get_listings(0, 999999, rarity, search))
+    def count_listings(self, rarity=None, search=None, listing_type=None) -> int:
+        return len(self.get_listings(0, 999999, rarity, search, listing_type))
 
     def get_listing(self, listing_id: str):
         return self._load("market").get(listing_id)
@@ -869,6 +950,32 @@ class LocalWebDB:
             self._u("market", market)
         return item
 
+    def get_auctions(self, now, skip=0, limit=24, bidder_id=None, expired=False):
+        items = [item for item in self._load("market").values()
+                 if item.get("listing_type") == "auction" and item.get("ends_at")
+                 and ((float(item["ends_at"]) <= now) if expired else (float(item["ends_at"]) > now))
+                 and (bidder_id is None or (item.get("highest_bid") or {}).get("bidder_id") == bidder_id
+                      or bidder_id in item.get("bidder_ids", []))]
+        return sorted(items, key=lambda item: item["ends_at"])[skip:skip + limit]
+
+    def get_auction_wins(self, user_id, skip=0, limit=10):
+        limit = min(limit, max(0, 10 - skip))
+        if limit <= 0:
+            return []
+        items = [tx for tx in self._load("transactions").values()
+                 if tx.get("type") == "auction_sale" and tx.get("from_id") == user_id]
+        return sorted(items, key=lambda tx: tx.get("ts", 0), reverse=True)[skip:skip + limit]
+
+    def increment_listing_views_many(self, listing_ids):
+        market = self._load("market")
+        for lid in set(listing_ids):
+            if lid in market:
+                market[lid]["views"] = market[lid].get("views", 0) + 1
+        self._u("market", market)
+
+    def get_user_names(self, user_ids):
+        return {uid: self.get_profile(uid) for uid in user_ids}
+
     def get_user_listings(self, user_id: int) -> list:
         return sorted(
             [v for v in self._load("market").values() if v.get("seller_id") == user_id],
@@ -890,6 +997,8 @@ class LocalWebDB:
         listing = self.get_listing(listing_id)
         if not listing:
             return {"ok": False, "error": "Listing not found"}
+        if (listing.get("listing_type") or "fixed") != "fixed":
+            return {"ok": False, "error": "Use Auction to bid on this card"}
         if listing["seller_id"] == buyer_id:
             return {"ok": False, "error": "Cannot buy your own listing"}
         price = listing["price"]
@@ -909,6 +1018,9 @@ class LocalWebDB:
         market = self._load("market")
         if listing_id in market:
             market[listing_id]["highest_bid"] = bid
+            bidders = market[listing_id].setdefault("bidder_ids", [])
+            if bid["bidder_id"] not in bidders:
+                bidders.append(bid["bidder_id"])
             self._u("market", market)
     def place_bid(self, listing_id: str, bidder_id: int, bidder_name: str, amount: int) -> dict:
         listing = self.get_listing(listing_id)
@@ -959,6 +1071,8 @@ class LocalWebDB:
         listing = self.get_listing(listing_id)
         if not listing:
             return {"ok": False, "error": "Listing not found"}
+        if (listing.get("listing_type") or "fixed") != "fixed":
+            return {"ok": False, "error": "Use Auction to bid on this card"}
         if listing.get("seller_id") == buyer_id:
             return {"ok": False, "error": "Cannot lucky-buy your own listing"}
         price = int(listing.get("price", 0))
@@ -999,6 +1113,8 @@ class LocalWebDB:
         now = time.time()
         with _PRESENCE_LOCK:
             slots = self._load("web_presence")
+            if self.touch_presence(presence_id, ttl):
+                return True
             for index in range(max_users):
                 key = f"slot-{index}"
                 slot = slots.get(key, {})
@@ -1054,15 +1170,12 @@ class LocalWebDB:
         tid = uuid.uuid4().hex
         txs[tid] = {"id": tid, "type": tx_type, "from_id": from_id, "to_id": to_id,
                     "amount": amount, "details": details or {}, "ts": time.time()}
-        # prune: keep only last 10 per user
-        for uid in set(filter(None, [from_id, to_id])):
-            user_txs = sorted(
-                [(k, v) for k, v in txs.items()
-                 if v.get("from_id") == uid or v.get("to_id") == uid],
-                key=lambda x: x[1].get("ts", 0), reverse=True,
-            )
-            for k, _ in user_txs[10:]:
-                txs.pop(k, None)
+        if tx_type == "auction_sale":
+            wins = sorted((row for row in txs.values()
+                           if row.get("type") == "auction_sale" and row.get("from_id") == from_id),
+                          key=lambda row: row.get("ts", 0), reverse=True)
+            for row in wins[10:]:
+                txs.pop(row["id"], None)
         self._u("transactions", txs)
 
     def get_transactions(self, user_id: int, limit=10) -> list:
@@ -1101,28 +1214,46 @@ class LocalWebDB:
         keys     = settings.get("web_api_keys", {}).get("keys", [])
         return any(k["key"] == key for k in keys)
 
+    def get_profile(self, user_id: int):
+        return {k: v for k, v in (self.get_user(user_id) or {}).items()
+                if k not in {"characters", "favorites"}}
+
+    def get_public_media(self):
+        settings = self._load("settings")
+        clean = _media_metadata
+        return {"logo": clean(settings.get("site_logo")), "ad": clean(settings.get("ad_banner")),
+                "slides": [clean(slide) for slide in settings.get("welcome_slides", [])]}
+
     def get_logo(self, include_data=True) -> dict | None:
         logo = self._load("settings").get("site_logo")
         return logo if logo and logo.get("data") else None
 
+    @invalidate_display
     def set_logo(self, data_b64: str, mime: str) -> None:
         s = self._load("settings")
-        s["site_logo"] = {"data": data_b64, "mime": mime}
+        s["site_logo"] = {"data": data_b64, "mime": mime, "version": hashlib.sha256(data_b64.encode()).hexdigest()}
         self._u("settings", s)
 
+    @invalidate_display
     def delete_logo(self) -> None:
         s = self._load("settings")
         s.pop("site_logo", None)
         self._u("settings", s)
 
+    def get_welcome_slide(self, index):
+        return self.get_welcome_slides()[index]
+
     def get_welcome_slides(self, include_data=True) -> list:
         return self._load("settings").get("welcome_slides", [])
 
+    @invalidate_display
     def set_welcome_slides(self, slides: list) -> None:
+        slides = [dict(slide, version=hashlib.sha256(slide["data"].encode()).hexdigest()) for slide in slides]
         s = self._load("settings")
         s["welcome_slides"] = slides
         self._u("settings", s)
 
+    @invalidate_display
     def delete_welcome_slide(self, index: int) -> None:
         slides = self.get_welcome_slides()
         if 0 <= index < len(slides):
@@ -1150,11 +1281,13 @@ class LocalWebDB:
         ad = self._load("settings").get("ad_banner")
         return ad if ad and ad.get("data") else None
 
+    @invalidate_display
     def set_ad_banner(self, data_b64: str, mime: str) -> None:
         s = self._load("settings")
-        s["ad_banner"] = {"data": data_b64, "mime": mime}
+        s["ad_banner"] = {"data": data_b64, "mime": mime, "version": hashlib.sha256(data_b64.encode()).hexdigest()}
         self._u("settings", s)
 
+    @invalidate_display
     def delete_ad_banner(self) -> None:
         s = self._load("settings")
         s.pop("ad_banner", None)
@@ -1174,6 +1307,7 @@ class LocalWebDB:
     def get_wheel_show(self) -> bool:
         return bool(self._load("wheel_config").get("show", False))
 
+    @invalidate_display
     def set_wheel_show(self, show: bool) -> None:
         cfg = self._load("wheel_config")
         cfg["show"] = bool(show)
@@ -1182,6 +1316,7 @@ class LocalWebDB:
     def get_card_update_show(self) -> bool:
         return bool(self._load("card_update_config").get("show", False))
 
+    @invalidate_display
     def set_card_update_show(self, show: bool) -> None:
         cfg = self._load("card_update_config")
         cfg["show"] = bool(show)
@@ -1283,6 +1418,7 @@ class LocalWebDB:
 
     def get_rocket_show(self) -> bool:
         return bool(self._load("rocket_config").get("show", False))
+    @invalidate_display
     def set_rocket_show(self, show: bool) -> None:
         cfg = self._load("rocket_config"); cfg["show"] = bool(show); self._u("rocket_config", cfg)
     def get_rocket_pool(self) -> int:
@@ -1351,6 +1487,7 @@ class LocalWebDB:
 # ── factory ───────────────────────────────────────────────────────────────────
 
 _db: MongoWebDB | LocalWebDB | None = None
+_DB_LOCK = RLock()
 
 
 def reset_db() -> None:
@@ -1360,6 +1497,11 @@ def reset_db() -> None:
 
 
 def get_db() -> MongoWebDB | LocalWebDB:
+    with _DB_LOCK:
+        return _get_db()
+
+
+def _get_db() -> MongoWebDB | LocalWebDB:
     global _db
     if _db is None:
         try:

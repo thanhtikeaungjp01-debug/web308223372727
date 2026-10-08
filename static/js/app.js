@@ -88,12 +88,8 @@ if (navToggle && mobileMenu) {
   });
   mobileMenu.querySelectorAll('.mobile-link').forEach(link => {
     link.addEventListener('click', (event) => {
-      // Keep navigation reliable inside Telegram Mini App/WebView: close the
-      // drawer, then explicitly navigate to the anchor target.
-      event.stopPropagation();
-      const target = link.href;
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       setMenuOpen(false);
-      if (target) window.location.assign(target);
     });
   });
   document.addEventListener('click', e => {
@@ -234,3 +230,42 @@ document.querySelectorAll('video.char-video').forEach(video => {
     video.addEventListener('error', markVideoReady, { once: true });
   }
 });
+
+/* Ads load only when visible, and stay unloaded after dismissal. */
+(() => {
+  const banner = document.getElementById('adBanner');
+  if (!banner) return;
+  const media = banner.querySelector('[data-src]');
+  const key = 'waifu-ad-dismissed:' + banner.dataset.adKey;
+  const hide = () => {
+    banner.hidden = true;
+    if (media instanceof HTMLVideoElement) { media.pause(); media.removeAttribute('src'); media.load(); }
+  };
+  try { if (sessionStorage.getItem(key) === '1') hide(); } catch (_) {}
+  document.getElementById('adBannerClose')?.addEventListener('click', () => {
+    hide();
+    try { sessionStorage.setItem(key, '1'); } catch (_) {}
+    document.getElementById('searchInput')?.focus({ preventScroll: true });
+  });
+  if (banner.hidden || !media) return;
+  media.addEventListener('error', hide, { once: true });
+  const load = () => { if (!banner.hidden) media.src = media.dataset.src; };
+  if ('IntersectionObserver' in window) {
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); load(); }
+    }, { rootMargin: '100px' });
+    observer.observe(banner);
+  } else load();
+})();
+
+/* Immediate feedback while the browser loads a fresh, authenticated page. */
+(() => {
+  const root = document.documentElement;
+  document.addEventListener('click', event => {
+    const link = event.target.closest('a[href]');
+    if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target || link.hasAttribute('download')) return;
+    const url = new URL(link.href, location.href);
+    if (url.origin === location.origin && (url.pathname !== location.pathname || url.search !== location.search)) root.classList.add('page-loading');
+  });
+  window.addEventListener('pageshow', () => root.classList.remove('page-loading'));
+})();

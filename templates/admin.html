@@ -109,13 +109,13 @@
 <!-- Welcome carousel images -->
 <section class="section">
   <h2 class="section-title">👋 Welcome Images</h2>
-  <p style="color:var(--text3);font-size:.85rem;margin-bottom:14px;">Upload one or more welcome images. They are automatically resized and compressed to keep storage small, then shown in order with a 2-second side-slide transition.</p>
+  <p style="color:var(--text3);font-size:.85rem;margin-bottom:14px;">Add up to {{ welcome_max_slides }} welcome images. Select several photos at once; each is resized and compressed. With two or more images, Home slides to the next photo every 3 seconds.</p>
   <div class="welcome-admin-upload">
     <input class="form-input" id="welcomeFileInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple>
     <button class="btn btn-primary" id="uploadWelcomeBtn" type="button">📤 Upload Welcome Images</button>
     <span id="welcomeUploadMsg" style="font-size:.82rem;color:var(--success);display:none;"></span>
   </div>
-  <div class="welcome-admin-grid" id="welcomeAdminGrid">
+  <div class="welcome-admin-grid" id="welcomeAdminGrid" data-count="{{ welcome_slides|length }}">
     {% for slide in welcome_slides %}
     <div class="welcome-admin-card" data-index="{{ loop.index0 }}">
       <img src="{{ url_for('welcome_media', index=loop.index0) }}" alt="Welcome {{ loop.index }}">
@@ -129,7 +129,7 @@
 <section class="section">
   <h2 class="section-title">📣 Market Mini Banner Ad</h2>
   <p style="color:var(--text3);font-size:.85rem;margin-bottom:18px;">
-    Image သို့မဟုတ် video URL ထည့်ပါ။ Market ထဲဝင်တဲ့အခါ ညာဘက်အောက်ထောင့်မှာ mini banner အနေနဲ့ ပေါ်လာပြီး `×` နဲ့ ဖျောက်နိုင်ပါမယ်။ Banner ကိုနှိပ်ရင် အောက်က link သို့ သွားပါမယ်။
+    Image သို့မဟုတ် video URL ထည့်ပါ။ Market ထဲမှာ featured banner အနေနဲ့ ပေါ်လာပြီး × နဲ့ ဖျောက်နိုင်ပါမယ်။ Video ကို နှိပ်မှ play လုပ်ပါမယ်။ View offer က အောက်က link ကို ဖွင့်ပေးပါမယ်။
   </p>
   <div class="ad-upload-row" style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:18px;padding:12px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;">
     <div class="form-group" style="margin-bottom:0;flex:1;min-width:220px;">
@@ -528,7 +528,7 @@ document.getElementById('uploadAdBannerBtn')?.addEventListener('click', async ()
 });
 
 document.getElementById('deleteAdBannerBtn')?.addEventListener('click', async () => {
-  if (!confirm('Remove the popup ad?')) return;
+  if (!confirm('Remove the featured ad?')) return;
   const btn = document.getElementById('deleteAdBannerBtn');
   btn.disabled = true; btn.textContent = '…';
   const res = await apiPost('/admin/ad-banner/delete');
@@ -666,6 +666,8 @@ document.getElementById('uploadWelcomeBtn')?.addEventListener('click', async () 
   const btn = document.getElementById('uploadWelcomeBtn');
   const msg = document.getElementById('welcomeUploadMsg');
   if (!input.files.length) { showToast('⚠️ Choose one or more images first.', 'error'); return; }
+  const grid = document.getElementById('welcomeAdminGrid');
+  if (Number(grid.dataset.count) + input.files.length > {{ welcome_max_slides }}) { showToast('Keep up to {{ welcome_max_slides }} welcome images. Remove an old image or select fewer files.', 'error'); return; }
   if ([...input.files].some(file => file.size > {{ welcome_upload_mb }} * 1024 * 1024)) { showToast('Maximum {{ welcome_upload_mb }} MB per image.', 'error'); return; }
   btn.disabled = true; btn.textContent = '⏳ Uploading…';
   try {
@@ -674,6 +676,7 @@ document.getElementById('uploadWelcomeBtn')?.addEventListener('click', async () 
       const response = await fetch('/admin/welcome', { method: 'POST', body: form });
       const data = await response.json();
       if (!data.ok) throw new Error(data.error || 'Upload failed');
+      grid.dataset.count = String(data.count);
     }
     msg.textContent = '✅ Uploaded and compressed'; msg.style.display = 'inline';
     showToast('✅ Welcome images saved.', 'success');

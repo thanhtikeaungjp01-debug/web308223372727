@@ -45,6 +45,32 @@ class BrandingTests(unittest.TestCase):
         image.seek(0)
         return self.client.post('/admin/logo', data={'logo':(image,'logo.png')}, headers=self.headers)
 
+    def test_five_welcome_photos_upload_render_and_reject_extra_without_changes(self):
+        def upload(color):
+            image = io.BytesIO()
+            Image.new('RGB', (40, 20), color).save(image, format='PNG')
+            image.seek(0)
+            return self.client.post('/admin/welcome', data={'welcome': (image, 'welcome.png')}, headers=self.headers)
+        for i, color in enumerate(('red', 'green', 'blue', 'pink', 'purple')):
+            response = upload(color)
+            self.assertTrue(response.json['ok'])
+            self.assertEqual(response.json['count'], i + 1)
+        slides = db.get_db().get_welcome_slides()
+        self.assertEqual(len(slides), 5)
+        before = [slide['data'] for slide in slides]
+        response = upload('yellow')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual([slide['data'] for slide in db.get_db().get_welcome_slides()], before)
+        home = self.client.get('/').get_data(as_text=True)
+        self.assertEqual(home.count('data-slide='), 5)
+        self.assertNotIn('miniBannerPause', home)
+        self.assertNotIn('aria-label="Show highlight', home)
+        self.assertIn('3 seconds', self.client.get('/admin').get_data(as_text=True))
+        self.assertTrue(self.client.post('/admin/welcome/2/delete', headers=self.headers).json['ok'])
+        self.assertTrue(upload('yellow').json['ok'])
+        self.identify(43)
+        self.assertEqual(upload('yellow').status_code, 403)
+
     def test_defaults_save_escape_and_persist(self):
         self.assertIn(b'WAIFU.', self.client.get('/').data)
         response = self.save(SITE_TITLE='<b>Guess</b>', SITE_SUBTITLE='Catch with us')
