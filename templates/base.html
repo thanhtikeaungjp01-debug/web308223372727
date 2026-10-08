@@ -86,7 +86,6 @@
       <span class="mobile-link-icon">⚙️</span><span>Admin</span><span class="mobile-link-arrow">›</span>
     </a>
     {% endif %}
-    <form action="{{ url_for('logout') }}" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="mobile-link logout-button" type="submit"><span class="mobile-link-icon">↪</span><span>Log out</span></button></form>
   {% else %}
     <a href="{{ url_for('index') }}#login" class="mobile-link">
       <span class="mobile-link-icon">🔑</span><span>Login</span><span class="mobile-link-arrow">›</span>
