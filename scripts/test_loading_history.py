@@ -40,7 +40,7 @@ class LoadingHistoryTests(unittest.TestCase):
                 display_state(self.store)
             self.assertEqual(read.call_count, 3)
         self.store.add_coins(42, 100)
-        self.assertIn(b'$1001.00', self.client.get('/').data)
+        self.assertEqual(self.client.get('/api/profile').json['balance'], '$1001.00')
 
     def test_legacy_media_fingerprints_are_read_only(self):
         mongo = object.__new__(db.MongoWebDB)

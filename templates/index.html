@@ -23,9 +23,9 @@
         {% else %}<img src="{{ url_for('static', filename='img/waifu-avatar.webp') }}" alt="" width="64" height="64">{% endif %}
         <span class="mini-avatar-spark">✦</span>
       </div>
-      <div class="mini-profile-name"><span class="mini-overline">{{ 'WELCOME BACK' if user else 'WELCOME, COLLECTOR' }}</span><h1>{{ user.first_name if user else 'Your story' }}<span class="mini-name-star" aria-hidden="true">✧</span></h1><p>{{ '@' ~ user.username if user and user.username else ('Waifu collector' if user else 'begins here.') }}</p></div>
+      <div class="mini-profile-name"><span class="mini-overline">{{ 'WELCOME BACK' if user else 'WELCOME, COLLECTOR' }}</span><h1><span id="miniDisplayName">{{ user.first_name if user else 'Your story' }}</span><span class="mini-name-star" aria-hidden="true">✧</span></h1><p>{{ '@' ~ user.username if user and user.username else ('Waifu collector' if user else 'begins here.') }}</p></div>
     </div>
-    <a class="mini-balance" href="{{ url_for('wallet') }}" aria-label="{{ 'Wallet balance ' ~ balance_str if user else 'Sign in to view wallet' }}"><span class="mini-balance-copy"><small>BALANCE</small><strong>{{ balance_str if user else '—' }}</strong></span><span class="mini-coin" aria-hidden="true">💸</span></a>
+    <a class="mini-balance" href="{{ url_for('wallet') }}" aria-label="{{ 'Wallet balance ' ~ balance_str if user else 'Sign in to view wallet' }}"><span class="mini-balance-copy"><small>BALANCE</small><strong id="miniBalanceValue">{{ balance_str if user else '—' }}</strong></span><span class="mini-coin" aria-hidden="true">💸</span></a>
   </section>
   <section class="mini-welcome" aria-label="Welcome to your waifu universe">
     <div class="mini-banner-track" id="miniBannerTrack">
@@ -34,7 +34,7 @@
       <a class="mini-banner" href="{{ url_for('market') }}" aria-label="Explore the market{{ ', highlight ' ~ loop.index if slides|length > 1 else '' }}">
         <img src="{{ slide }}" alt="" width="1080" height="383" loading="{{ 'eager' if loop.first else 'lazy' }}" fetchpriority="{{ 'high' if loop.first else 'auto' }}" decoding="async" onerror="this.onerror=null;this.src='{{ url_for('static', filename='img/waifu-welcome.webp') }}'">
         <span class="mini-banner-tag">{{ icon('star') }} A WORLD OF FAVORITES</span>
-        <span class="mini-banner-caption"><span><small>WELCOME HOME</small></span><span class="mini-banner-arrow">{{ icon('arrow') }}</span></span>
+        <span class="mini-banner-caption"><span><small>WELCOME HOME</small></span></span>
       </a>
       {% endfor %}
     </div>

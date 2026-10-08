@@ -13,6 +13,7 @@ import time
 import random
 import secrets
 import tempfile
+import subprocess
 import urllib.parse
 from PIL import Image, ImageOps
 from functools import lru_cache
@@ -50,6 +51,11 @@ try:
     from web.display_cache import display_state
 except ModuleNotFoundError:
     from display_cache import display_state
+
+try:
+    from web.video_media import transcode_480p, MAX_VIDEO_INPUT
+except ModuleNotFoundError:
+    from video_media import transcode_480p, MAX_VIDEO_INPUT
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 if IS_VERCEL or os.environ.get("TRUST_PROXY") == "1":
@@ -318,7 +324,7 @@ def media_url(value, fallback: str | None = None, hint: str = "") -> str | None:
     ref = _media_ref(value)
     if not ref:
         return fallback
-    return url_for("media_proxy", token=_media_token(ref), **({"w": 640} if _media_kind(ref, hint) == "image" else {}))
+    return url_for("media_proxy", token=_media_token(ref), **({"w": 640} if _media_kind(ref, hint) == "image" else {"q": "480"}))
 
 
 def char_img_url(img_url: str) -> str:
@@ -384,6 +390,7 @@ def inject_site_logo():
         "is_owner": is_owner(),
         "rocket_show": False,
         "card_update_show": False,
+        "lucky_buy_enabled": _cfg("LUCKY_BUY_ENABLED", "1") == "1",
     }
     try:
         state = display_state(get_db())
@@ -424,6 +431,22 @@ def _csrf_token():
 app.jinja_env.globals["csrf_token"] = _csrf_token
 
 
+def _banned_response():
+    g.web_banned = True
+    if request.path.startswith(('/api/', '/auth/')) and (request.is_json or request.path.startswith('/api/')):
+        return jsonify(ok=False, banned=True, error="User Is Banned"), 403
+    return render_template("banned.html"), 403
+
+
+@app.before_request
+def check_web_ban():
+    if request.endpoint in {"static", "healthz", "media_proxy", "proxy_image", "site_logo", "welcome_media", "ad_banner_media"}:
+        return
+    uid = session.get("user_id")
+    if uid and get_db().is_web_banned(uid):
+        return _banned_response()
+
+
 @app.before_request
 def protect_requests():
     if request.is_json and request.method not in {"GET", "HEAD", "OPTIONS"}:
@@ -452,11 +475,35 @@ def protect_requests():
         return jsonify(ok=False, error="Your session changed. Refresh the page and try again."), 403
 
 
+@app.before_request
+def prevent_duplicate_actions():
+    protected = {'api_sell', 'api_buy', 'api_lucky_buy', 'api_auction_bid',
+                 'api_auction_close', 'api_delist', 'api_rocket_bet', 'api_rocket_cashout',
+                 'api_transfer', 'api_card_update_spin', 'api_wheel_spin',
+                 'api_admin_delist', 'admin_reset_pool'}
+    uid = session.get('user_id')
+    if request.method in {'POST', 'DELETE'} and uid and request.endpoint in protected:
+        token = get_db().begin_action(uid, request.endpoint)
+        if not token:
+            return jsonify(ok=False, error='Please wait before trying again.'), 429
+        g.action_guard = (uid, request.endpoint, token)
+
+
+@app.after_request
+def release_action_guard(response):
+    guard = getattr(g, 'action_guard', None)
+    if guard:
+        payload = response.get_json(silent=True) or {}
+        cooldown = 0.8 if payload.get('ok') and request.endpoint not in {'api_card_update_spin', 'api_wheel_spin'} else 0
+        get_db().finish_action(*guard, cooldown=cooldown)
+    return response
+
+
 @app.after_request
 def security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    if request.endpoint not in {"static", "media_proxy", "proxy_image", "site_logo", "welcome_media", "ad_banner_media", "healthz"}:
+    if getattr(g, "web_banned", False) or request.endpoint not in {"static", "media_proxy", "proxy_image", "site_logo", "welcome_media", "ad_banner_media", "healthz"}:
         response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -575,12 +622,13 @@ def _serve_cached_media(ref: str):
     """Bounded per-instance disk cache, plus browser/CDN caching across visits."""
     ref = _media_ref(ref)
     thumbnail = request.args.get("w") == "640"
-    key = hashlib.sha256((ref + ("|thumb640-v1" if thumbnail else "")).encode()).hexdigest()
+    video = request.args.get("q") == "480"
+    key = hashlib.sha256((ref + ("|video480-v1:" + ("webm" if request.args.get("format") == "webm" else "mp4") if video else "|thumb640-v1" if thumbnail else "")).encode()).hexdigest()
     with _MEDIA_LOCKS[int(key[:2], 16) % len(_MEDIA_LOCKS)]:
-        return _fetch_cached_media(ref, key, thumbnail)
+        return _fetch_cached_media(ref, key, thumbnail, video)
 
 
-def _fetch_cached_media(ref, key, thumbnail):
+def _fetch_cached_media(ref, key, thumbnail, video=False):
     stable = not ref.startswith(("http://", "https://"))
     cache_file = os.path.join(_MEDIA_CACHE_DIR, key)
     meta_file = cache_file + ".ct"
@@ -600,28 +648,39 @@ def _fetch_cached_media(ref, key, thumbnail):
     info = _tg_file_info(ref) if stable else None
     url = (info or {}).get("url") if stable else ref
     if not url:
+        if video: return jsonify(ok=False, error="Video unavailable"), 422
         return _serve_no_image()
     temporary = f"{cache_file}.tmp.{secrets.token_hex(12)}"
     response = None
     try:
-        response = _req.get(url, stream=True, timeout=(6, 20))
+        response = _req.get(url, stream=True, timeout=(4, 8) if video else (6, 20))
         if response.status_code != 200:
-            return _serve_no_image()
+            raise ValueError("upstream media unavailable")
         content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
         if not content_type:
             content_type = "video/mp4" if _media_kind(ref, (info or {}).get("path", "")) == "video" else "image/jpeg"
         image_variant = thumbnail and content_type.startswith("image/")
-        download_limit = 12 * 1024 * 1024 if IS_VERCEL and image_variant else _MAX_MEDIA_BYTES
+        download_limit = MAX_VIDEO_INPUT if video else (12 * 1024 * 1024 if IS_VERCEL and image_variant else _MAX_MEDIA_BYTES)
         total = 0
+        download_started = time.monotonic()
         with open(temporary, "wb") as output:
             for chunk in response.iter_content(chunk_size=64 * 1024):
                 if not chunk:
                     continue
                 total += len(chunk)
+                if video and time.monotonic() - download_started > 10:
+                    raise ValueError("video download timeout")
                 if total > download_limit:
                     raise ValueError("media download limit exceeded")
                 output.write(chunk)
-        if image_variant:
+        if video:
+            output_format = "webm" if request.args.get("format") == "webm" else "mp4"
+            converted_video = temporary + "." + output_format
+            transcode_480p(temporary, converted_video, output_format)
+            os.replace(converted_video, temporary)
+            total = os.path.getsize(temporary)
+            content_type = "video/" + output_format
+        elif image_variant:
             try:
                 with Image.open(temporary) as original:
                     if original.width * original.height > 25_000_000:
@@ -646,7 +705,13 @@ def _fetch_cached_media(ref, key, thumbnail):
         with open(meta_file, "w") as metadata:
             metadata.write(content_type)
         return _media_response(cache_file, content_type, stable)
-    except (OSError, ValueError, _req.RequestException):
+    except (OSError, ValueError, _req.RequestException, subprocess.SubprocessError):
+        if video:
+            response_error = jsonify(ok=False, error="Unable to prepare this video. Try again or upload an MP4 under 5 minutes / 32 MB.")
+            response_error.status_code = 422
+            response_error.headers["Cache-Control"] = "no-store"
+            response_error.headers["Vercel-CDN-Cache-Control"] = "no-store"
+            return response_error
         return _serve_no_image()
     finally:
         if response is not None:
@@ -745,6 +810,10 @@ def bot_auth():
     uid   = int(doc["user_id"])
     fname = doc.get("first_name", "")
     uname = doc.get("username",   "")
+    if get_db().is_web_banned(uid):
+        session.clear()
+        session["user_id"] = uid
+        return _banned_response()
     get_db().ensure_user(uid, fname, uname)
     session.clear()
     session.permanent     = True
@@ -764,6 +833,10 @@ def telegram_auth():
     uid   = int(data["id"])
     fname = data.get("first_name", "")
     uname = data.get("username",   "")
+    if get_db().is_web_banned(uid):
+        session.clear()
+        session["user_id"] = uid
+        return _banned_response()
     get_db().ensure_user(uid, fname, uname)
     session.clear()
     session.permanent     = True
@@ -787,6 +860,10 @@ def webapp_auth():
     if not tg_user:
         return jsonify(ok=False, error="Login expired or invalid. Reopen the app from Telegram."), 403
     uid = int(tg_user["id"])
+    if get_db().is_web_banned(uid):
+        session.clear()
+        session["user_id"] = uid
+        return _banned_response()
     get_db().ensure_user(uid, tg_user.get("first_name", ""), tg_user.get("username", ""))
     session.clear()
     session.permanent = True
@@ -840,17 +917,24 @@ def index():
     if request.args.get("next"):
         session["login_next"] = _safe_next_url(request.args.get("next"), "/")
     user = current_user()
-    if user:
-        stored = get_db().get_profile(int(user["id"])) or {}
-        user.update({k: stored[k] for k in ("photo_url", "avatar") if stored.get(k)})
-        user["photo_url"] = user.get("photo_url") or user.get("avatar", "")
-    balance_str = usd(stored.get("coins", 0)) if user else "0.00"
+    balance_str = "—"
     return render_template(
         "index.html", bot_username=_bot_username(), user=user,
         balance_str=balance_str,
         welcome_slides=[url_for("welcome_media", index=i, v=slide.get("version")) for i, slide in enumerate(display_state(get_db())["slides"])],
         is_owner=is_owner(),
     )
+
+
+@app.route("/api/profile")
+@api_login_required
+def api_profile():
+    user = current_user()
+    stored = get_db().get_profile(int(user["id"])) or {}
+    photo = stored.get("photo_url") or stored.get("avatar") or user.get("photo_url")
+    return jsonify(ok=True, balance=usd(stored.get("coins", 0)),
+                   photo_url=media_url(photo) if photo else "",
+                   first_name=stored.get("first_name") or user.get("first_name", ""))
 
 
 @app.route("/market")
@@ -1020,6 +1104,7 @@ def admin():
                            wheel_show=wheel_show,
                             wheel_codes=wheel_codes,
                            lucky_pool_balance=usd(db.get_lucky_pool()),
+                           auction_quota=db.get_auction_quota(),
                            maintenance_mode=_cfg("MAINTENANCE_MODE", "0") == "1",
                            rocket_show=rocket_show,
                            card_update_show=card_update_show,
@@ -1110,6 +1195,36 @@ def api_admin_maintenance():
     _cfg_save({"MAINTENANCE_MODE": "1" if enabled else "0"})
     _cfg_reload()
     return jsonify({"ok": True, "enabled": enabled})
+@app.route("/api/admin/lucky-buy", methods=["POST"])
+def admin_lucky_buy_switch():
+    if not is_owner(): return jsonify(ok=False, error="Unauthorized"), 403
+    enabled = (request.get_json(silent=True) or {}).get("enabled")
+    if not isinstance(enabled, bool): return jsonify(ok=False, error="Expected enabled boolean"), 400
+    _cfg_save({"LUCKY_BUY_ENABLED": "1" if enabled else "0"})
+    return jsonify(ok=True, enabled=enabled)
+
+
+@app.route('/api/admin/pool/reset', methods=['POST'])
+def admin_reset_pool():
+    if not is_owner(): return jsonify(ok=False, error='Unauthorized'), 403
+    pool = (request.get_json(silent=True) or {}).get('pool')
+    if pool not in {'lucky', 'rocket'}: return jsonify(ok=False, error='Choose a pool'), 400
+    get_db().reset_web_pool(pool)
+    return jsonify(ok=True, pool=pool, balance='$0.00')
+
+
+@app.route("/api/admin/web-ban", methods=["POST"])
+def admin_web_ban():
+    if not is_owner(): return jsonify(ok=False, error="Unauthorized"), 403
+    data = request.get_json(silent=True) or {}
+    if not valid_user_id(data.get("user_id")) or not isinstance(data.get("banned"), bool):
+        return jsonify(ok=False, error="Enter a valid Telegram user ID"), 400
+    uid = int(data["user_id"])
+    if uid == int(_owner_id()): return jsonify(ok=False, error="The owner cannot be banned"), 400
+    get_db().set_web_ban(uid, data["banned"])
+    return jsonify(ok=True, user_id=uid, banned=data["banned"])
+
+
 # ── API: sell ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/sell", methods=["POST"])
@@ -1140,19 +1255,18 @@ def api_sell():
         auction_floor = int(AUCTION_MIN_PRICE.get(char.get("rarity", ""), 1))
         if price < auction_floor:
             return jsonify({"ok": False, "error": f"Auction for {char.get('rarity', 'this rarity')} must start at least {usd(auction_floor)} (half reference price)."})
-        today = time.gmtime()
-        posted_today = sum(
-            1 for item in db.get_user_listings(uid)
-            if item.get("listing_type") == "auction"
-            and time.gmtime(float(item.get("listed_at", 0))).tm_year == today.tm_year
-            and time.gmtime(float(item.get("listed_at", 0))).tm_yday == today.tm_yday
-        )
-        if posted_today >= 1:
-            return jsonify({"ok": False, "error": "Auction limit reached — you can list only 1 card per day."})
     if db.get_balance(uid) < LIST_FEE:
         return jsonify({"ok": False, "error": f"Need {usd(LIST_FEE)} listing fee"})
-    removed = db.remove_char(uid, char_id)
+    quota_month = db.reserve_auction_slot(uid) if listing_type == "auction" else None
+    if listing_type == "auction" and not quota_month:
+        return jsonify(ok=False, error="Monthly auction limit reached (15/15). Resets on the first day of next month (UTC)."), 429
+    try:
+        removed = db.remove_char(uid, char_id)
+    except Exception:
+        if quota_month: db.refund_auction_slot(uid, quota_month)
+        raise
     if not removed:
+        if quota_month: db.refund_auction_slot(uid, quota_month)
         return jsonify({"ok": False, "error": "Could not remove character — try again"})
     db.add_coins(uid, -LIST_FEE)
     seller_name = session.get("first_name", str(uid))
@@ -1161,7 +1275,13 @@ def api_sell():
     except (TypeError, ValueError):
         duration_hours = 24 if listing_type == "auction" else None
     ends_at = time.time() + duration_hours * 3600 if duration_hours else None
-    lid = db.add_listing(uid, seller_name, char, price, listing_type, ends_at)
+    try:
+        lid = db.add_listing(uid, seller_name, char, price, listing_type, ends_at)
+    except Exception:
+        db.add_char(uid, removed)
+        db.add_coins(uid, LIST_FEE)
+        if quota_month: db.refund_auction_slot(uid, quota_month)
+        raise
     db.log_transaction("sell_list", uid, uid, LIST_FEE,
                        {"char": char, "listing_id": lid, "price": price})
     return jsonify({"ok": True, "listing_id": lid,
@@ -1197,6 +1317,8 @@ def api_buy(listing_id):
 @app.route("/api/lucky-buy/<listing_id>", methods=["POST"])
 @api_login_required
 def api_lucky_buy(listing_id):
+    if _cfg("LUCKY_BUY_ENABLED", "1") != "1":
+        return jsonify(ok=False, error="Lucky Buy is disabled"), 403
     data = request.get_json(silent=True) or {}
     try:
         stake = int(round(float(data.get("stake", 0)) * 100))

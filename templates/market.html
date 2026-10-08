@@ -12,7 +12,13 @@
 
 {% if welcome_slides %}
 <section class="welcome-carousel" aria-label="Welcome">
-  <style>.welcome-carousel{max-width:760px;margin-left:auto;margin-right:auto}.welcome-track{max-height:220px}.welcome-slide{max-height:220px;object-fit:cover}</style>
+  <style>
+    .welcome-carousel{position:relative;max-width:760px;margin-left:auto;margin-right:auto}
+    .welcome-track{display:block;min-height:0;aspect-ratio:auto}
+    .welcome-slide{display:block;position:absolute;inset:0;width:100%;height:auto;aspect-ratio:auto;object-fit:contain}
+    .welcome-slide.is-active{position:relative}
+    .welcome-dots{position:absolute;inset:auto 0 8px;padding:4px;pointer-events:none}
+  </style>
   <div class="welcome-track" id="welcomeTrack">
     {% for slide in welcome_slides %}
     <img class="welcome-slide{% if loop.first %} is-active{% endif %}" src="{{ slide }}" alt="Welcome" loading="{% if loop.first %}eager{% else %}lazy{% endif %}">
@@ -34,7 +40,7 @@
     current = (current + 1) % slides.length;
     slides[current].classList.add('is-active');
     dots[current]?.classList.add('is-active');
-  }, 2000);
+  }, 3000);
 })();
 </script>
 {% endif %}
@@ -70,10 +76,10 @@
   <div class="char-card" data-lid="{{ lst._id_str }}">
     <div class="char-img-wrap">
       {% if lst.char_video %}
-      <video src="{{ lst.char_video }}"
+      <video data-video-src="{{ lst.char_video }}"
              class="char-img char-video"
-             controls playsinline
-             preload="{% if loop.index > 3 %}none{% else %}metadata{% endif %}"
+             playsinline
+             preload="none"
              {% if lst.char_img %}poster="{{ lst.char_img }}"{% endif %}
              aria-label="{{ lst.char.name }} video">
       </video>
@@ -108,7 +114,7 @@
                 data-price="{{ lst.price_str }}">
           🛒 Buy
         </button>{% endif %}
-        <button class="btn btn-lucky btn-sm lucky-btn"
+        {% if lucky_buy_enabled %}<button class="btn btn-lucky btn-sm lucky-btn"
                 data-lid="{{ lst._id_str }}"
                 data-name="{{ lst.char.name|e }}"
                 data-price-cents="{{ lst.price }}"
@@ -116,7 +122,7 @@
                 data-img="{{ (lst.char_img or '')|e }}"
                 data-video="{{ (lst.char_video or '')|e }}"
                 data-logo="{{ (site_logo_url or '')|e }}"
-                title="Lucky Buy this card" aria-label="Lucky Buy this card">☘️</button>
+                title="Lucky Buy this card" aria-label="Lucky Buy this card">☘️</button>{% endif %}
         {% else %}
         <button class="btn btn-danger btn-sm delist-btn"
                 data-lid="{{ lst._id_str }}">
@@ -261,6 +267,7 @@ document.querySelectorAll('.buy-btn').forEach(btn => {
 document.getElementById('buyConfirmBtn').addEventListener('click', async () => {
   if (!_buyLid) return;
   const btn = document.getElementById('buyConfirmBtn');
+  if (btn.disabled) return;
   btn.disabled = true; btn.textContent = 'Buying…';
   const res = await apiPost(`/api/buy/${_buyLid}`);
   closeModal('buyModal');
@@ -424,6 +431,7 @@ document.getElementById('luckyBuyConfirmBtn')?.addEventListener('click', async (
     showToast('❌ Lucky Buy minimum is $5.00', 'error'); return;
   }
   const btn = document.getElementById('luckyBuyConfirmBtn');
+  if (btn.disabled) return;
   btn.disabled = true; btn.textContent = 'Trying…';
   const currentLid = _luckyLid;
   const sourceBtn = document.querySelector(`.lucky-btn[data-lid="${currentLid}"]`);

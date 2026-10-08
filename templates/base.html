@@ -8,6 +8,9 @@
   <meta name="theme-color" content="#10101c">
   <meta name="description" content="Discover anime characters, grow your collection, and trade with the Waifu Market community.">
   <meta name="tg-logged-in" content="{{ '1' if user else '0' }}">
+  <script>document.documentElement.classList.add('booting');</script>
+  <style>html.booting body>:not(#appLoader):not(script):not(noscript){visibility:hidden}#appLoader{position:fixed;inset:0;z-index:99999;background:#100e1c;color:#f5edff;display:grid;place-content:center;justify-items:center;gap:18px;font:16px system-ui}.boot-flower{font-size:48px;animation:flower-spin 1.4s linear infinite}@keyframes flower-spin{to{transform:rotate(360deg)}}#appLoader[hidden]{display:none}</style>
+  <noscript><style>html.booting body>*{visibility:visible!important}#appLoader{display:none}</style></noscript>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   {% block page_styles %}{% endblock %}
   <script defer src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -21,6 +24,14 @@
 </head>
 <body class="{% block body_class %}{% endblock %}">
 
+<div id="appLoader" role="status" aria-live="polite"><span class="boot-flower" aria-hidden="true">🌸</span><span id="bootMessage">Loading your world…</span><button id="bootRetry" type="button" hidden onclick="location.reload()">Try again</button></div>
+<script>
+window.AppBoot={
+  finish(){document.documentElement.classList.remove('booting');document.getElementById('appLoader')?.setAttribute('hidden','');},
+  fail(message){document.getElementById('bootMessage').textContent=message;document.getElementById('bootRetry').hidden=false;},
+  ban(){document.documentElement.classList.remove('booting');document.body.replaceChildren(document.createTextNode('User Is Banned'));document.body.style.cssText='margin:0;min-height:100dvh;display:grid;place-items:center;background:#100e1c;color:#f4eafa;font:600 24px system-ui';}
+};
+</script>
 <a class="skip-link" href="#main-content">Skip to content</a>
 
 <!-- Navbar -->

@@ -86,8 +86,8 @@
        data-sellable="{{ c.sellable | lower }}">
     <div class="char-img-wrap">
       {% if c.char_video %}
-      <video src="{{ c.char_video }}" class="char-img char-video"
-             controls playsinline preload="metadata"
+      <video data-video-src="{{ c.char_video }}" class="char-img char-video"
+             playsinline preload="none"
              {% if c.char_img %}poster="{{ c.char_img }}"{% endif %}
              aria-label="{{ c.name }} video">
       </video>
