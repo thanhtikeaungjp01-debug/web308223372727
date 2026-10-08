@@ -118,3 +118,8 @@ Focused synthetic checks: `PYTHONPATH=. python scripts/test_loading_history.py`.
 
 
 Rocket, Update and Wheel appear beneath Home's four main action buttons when their owner visibility switches are enabled. Wheel opens its existing spin modal there. Market lists only fixed-price cards (including legacy listings without a type); Auction lists only auctions. Direct Market purchase/Lucky Buy requests also reject auction cards.
+
+
+## Welcome slideshow
+
+In **Admin → Appearance → Welcome Images**, select several photos and upload them (up to five stored photos). Home automatically slides every three seconds when there are at least two photos and loops back to the first. A single photo stays still. The dots indicate the current photo. There are no manual slide or pause controls. Rotation waits while the page is hidden or the banner is off screen, then resumes when visible. Reduced-motion devices use instant transitions. Existing uploaded photos are preserved; remove one before adding more if the list is full.

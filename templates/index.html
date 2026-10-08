@@ -38,7 +38,7 @@
       </a>
       {% endfor %}
     </div>
-    {% if slides|length > 1 %}<div class="mini-banner-dots" aria-label="Choose welcome highlight">{% for slide in slides %}<button type="button" aria-label="Show highlight {{ loop.index }}" aria-pressed="{{ 'true' if loop.first else 'false' }}" data-slide="{{ loop.index0 }}"></button>{% endfor %}</div>{% endif %}
+    {% if slides|length > 1 %}<div class="mini-banner-dots" aria-hidden="true">{% for slide in slides %}<span data-slide="{{ loop.index0 }}" data-active="{{ 'true' if loop.first else 'false' }}"></span>{% endfor %}</div>{% endif %}
   </section>
 
   <div class="mini-section-label"><span>MAKE IT YOURS</span><span class="mini-section-star" aria-hidden="true">✧</span></div>

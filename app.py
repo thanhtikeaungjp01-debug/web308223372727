@@ -1319,6 +1319,7 @@ MAX_AD_MEDIA_BYTES = (4 if IS_VERCEL else 25) * 1024 * 1024
 MAX_LOGO_UPLOAD_BYTES = (4 if IS_VERCEL else 5) * 1024 * 1024
 MAX_WELCOME_UPLOAD_BYTES = (4 if IS_VERCEL else 8) * 1024 * 1024
 MAX_WELCOME_STORED_BYTES = 180 * 1024
+MAX_WELCOME_SLIDES = 5
 
 def _stored_media_response(item):
     fingerprint = hashlib.sha256(item["data"].encode()).hexdigest()
@@ -1394,6 +1395,9 @@ def admin_welcome_upload():
     f = request.files.get("welcome")
     if not f or f.content_type not in ALLOWED_IMG:
         return jsonify({"ok": False, "error": "Please upload a PNG, JPG, GIF, or WebP image."})
+    slides = get_db().get_welcome_slides()
+    if len(slides) >= MAX_WELCOME_SLIDES:
+        return jsonify({"ok": False, "error": "Keep up to 5 welcome images. Remove one before adding another."}), 400
     raw = f.read(MAX_WELCOME_UPLOAD_BYTES + 1)
     if not raw or len(raw) > MAX_WELCOME_UPLOAD_BYTES:
         return jsonify({"ok": False, "error": f"Image is empty or larger than {MAX_WELCOME_UPLOAD_BYTES // (1024 * 1024)} MB."})
@@ -1407,7 +1411,6 @@ def admin_welcome_upload():
             quality -= 7
             out = io.BytesIO()
             image.save(out, format="WEBP", quality=quality, method=6, optimize=True)
-        slides = get_db().get_welcome_slides()
         slides.append({"data": base64.b64encode(out.getvalue()).decode(), "mime": "image/webp"})
         get_db().set_welcome_slides(slides)
         return jsonify({"ok": True, "url": url_for("welcome_media", index=len(slides) - 1), "count": len(slides)})
@@ -1988,6 +1991,7 @@ def http_error(error):
 def upload_limits():
     return {"logo_upload_mb": MAX_LOGO_UPLOAD_BYTES // (1024 * 1024),
             "welcome_upload_mb": MAX_WELCOME_UPLOAD_BYTES // (1024 * 1024),
+            "welcome_max_slides": MAX_WELCOME_SLIDES,
             "ad_upload_mb": MAX_AD_MEDIA_BYTES // (1024 * 1024)}
 
 
