@@ -18,6 +18,11 @@ try:
 except ModuleNotFoundError:
     from display_cache import invalidate_display
 
+try:
+    from web.web_controls import WebControls
+except ModuleNotFoundError:
+    from web_controls import WebControls
+
 # ── rarity constants ──────────────────────────────────────────────────────────
 
 RARITY_VALUE: dict[str, int] = {
@@ -119,13 +124,14 @@ def _media_metadata(item):
 
 # ── MongoDB backend ────────────────────────────────────────────────────────────
 
-class MongoWebDB:
+class MongoWebDB(WebControls):
     def __init__(self, mongo_uri: str, db_name: str):
         from pymongo import MongoClient, DESCENDING
         self._DESC = DESCENDING
         self._client = MongoClient(mongo_uri, serverSelectionTimeoutMS=6000,
                                    connectTimeoutMS=5000, socketTimeoutMS=10000, maxPoolSize=10)
         mdb = self._client[db_name]
+        self._web_controls = mdb["web_controls"]
         self._users    = mdb["users"]
         self._market   = mdb["market_listings"]
         self._chars    = mdb["anime_characters"]
@@ -811,7 +817,7 @@ class MongoWebDB:
 
 # ── JSON-file fallback ────────────────────────────────────────────────────────
 
-class LocalWebDB:
+class LocalWebDB(WebControls):
     _DIR = Path("data")
 
     def __init__(self):

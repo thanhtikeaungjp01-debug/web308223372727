@@ -9,33 +9,54 @@ window.fetch = (input, options = {}) => {
     if (token) headers.set('X-CSRF-Token', token);
     options = { ...options, headers };
   }
-  return nativeFetch(input, options);
+  return nativeFetch(input, options).then(async response => {
+    if (url.origin === location.origin && response.status === 403 && response.headers.get('Content-Type')?.includes('application/json')) {
+      const payload = await response.clone().json().catch(() => ({}));
+      if (payload.banned) window.AppBoot?.ban();
+    }
+    return response;
+  });
 };
 
 /* ── Telegram Mini App init ──────────────────────────────────────────────── */
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', async function () {
   const tg = window.Telegram?.WebApp;
-  if (!tg || !tg.initData) return;          // not inside Telegram — skip
-
-  tg.ready();
-
-  // Already logged in → nothing to do
-  const metaLoggedIn = document.querySelector('meta[name="tg-logged-in"]');
-  if (metaLoggedIn && metaLoggedIn.content === '1') return;
-
-  // Auto-login using initData (HMAC validated server-side)
-  fetch('/auth/webapp', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ initData: tg.initData, next: new URLSearchParams(location.search).get('next') || location.pathname }),
-    signal: AbortSignal.timeout(15000),
-  })
-    .then(r => r.json())
-    .then(d => {
-      if (d.ok) window.location.href = d.redirect || '/';
-      else reportLoginError(d.error || 'Unable to sign in. Please reopen the app from Telegram.');
-    })
-    .catch(() => reportLoginError('Unable to connect. Please reopen the app from Telegram.'));
+  const loggedIn = document.querySelector('meta[name="tg-logged-in"]')?.content === '1';
+  if (tg?.initData) tg.ready();
+  if (tg?.initData && !loggedIn) {
+    try {
+      const response = await fetch('/auth/webapp', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({initData:tg.initData,next:new URLSearchParams(location.search).get('next')||location.pathname}),
+        signal:AbortSignal.timeout(15000)
+      });
+      const result = await response.json();
+      if (result.banned) return;
+      if (!result.ok) throw new Error(result.error || 'Unable to sign in. Reopen the app from Telegram.');
+      location.replace(result.redirect || '/');
+      return;
+    } catch (error) { window.AppBoot?.fail(error.message); return; }
+  }
+  if (loggedIn && document.getElementById('miniBalanceValue')) {
+    try {
+      const response = await fetch('/api/profile', {signal:AbortSignal.timeout(15000)});
+      const result = await response.json();
+      if (result.banned) return;
+      if (!response.ok || !result.ok) throw new Error(result.error || 'Could not load your profile.');
+      document.getElementById('miniBalanceValue').textContent = result.balance;
+      document.getElementById('miniDisplayName').textContent = result.first_name;
+      const avatar = document.querySelector('.mini-avatar');
+      if (result.photo_url && avatar) {
+        const picture = avatar.querySelector('img') || document.createElement('img');
+        picture.width=64; picture.height=64; picture.alt=''; picture.decoding='async';
+        picture.onerror=()=>picture.remove();
+        picture.src=result.photo_url;
+        if (!picture.parentNode) avatar.append(picture);
+      }
+      document.querySelector('.mini-balance')?.setAttribute('aria-label', 'Wallet balance ' + result.balance);
+    } catch(error) { window.AppBoot?.fail(error.message); return; }
+  }
+  window.AppBoot?.finish();
 });
 
 function reportLoginError(message) {
@@ -219,16 +240,30 @@ document.querySelectorAll('.char-img, .table-char-img').forEach(img => {
   }
 });
 document.querySelectorAll('video.char-video').forEach(video => {
-  const markVideoReady = () => {
-    video.classList.add('img-ready');
-    const wrap = video.closest('.char-img-wrap');
-    if (wrap) wrap.classList.add('loaded');
-  };
-  if (video.readyState >= 2) markVideoReady();
-  else {
-    video.addEventListener('loadeddata', markVideoReady, { once: true });
-    video.addEventListener('error', markVideoReady, { once: true });
-  }
+  const shell = document.createElement('div');
+  shell.className = 'video-shell';
+  video.before(shell); shell.append(video);
+  video.classList.add('img-ready');
+  video.closest('.char-img-wrap')?.classList.add('loaded');
+  video.preload = 'none'; video.controls = false;
+  if (!video.poster) video.poster = '/static/img/card-placeholder.svg';
+  const button = document.createElement('button');
+  button.type = 'button'; button.className = 'video-play';
+  button.textContent = '▶ Play video · 480p';
+  shell.append(button);
+  const failed = () => { button.hidden=false; button.disabled=false; button.textContent='↻ Video unavailable · Tap to retry'; };
+  video.addEventListener('error', failed);
+  video.addEventListener('playing', () => { button.hidden=true; });
+  button.addEventListener('click', () => {
+    button.disabled=true; button.textContent='🌸 Preparing video…';
+    video.controls=true;
+    const source = new URL(video.dataset.videoSrc, location.href);
+    // Telegram's WebViews support MP4; Chromium builds without H.264 use WebM.
+    if (!video.canPlayType('video/mp4; codecs="avc1.42E01E"')) source.searchParams.set('format', 'webm');
+    video.src=source.href;
+    video.load();
+    video.play().catch(failed);
+  });
 });
 
 /* Ads load only when visible, and stay unloaded after dismissal. */

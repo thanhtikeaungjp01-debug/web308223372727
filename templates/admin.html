@@ -24,6 +24,24 @@
   @media (max-width:560px) { .admin-tabs { top:4px !important; } .admin-tab { flex:1 1 42%; padding:9px 7px; font-size:.76rem; } }
 </style>
 
+<section class="section">
+  <h2 class="section-title">Lucky Buy Switch</h2>
+  <label class="form-label"><input type="checkbox" id="luckyBuyEnabled" {% if lucky_buy_enabled %}checked{% endif %}> Enable Lucky Buy on cards</label>
+  <p id="luckySwitchStatus" role="status"></p>
+</section>
+<section class="section">
+  <h2 class="section-title">Auction Sandbox</h2>
+  <p>15 listings per user · {{ auction_quota.month }} (UTC). All users reset together on the first of the next month.</p>
+  <div class="quota-sandbox">{% for uid in auction_quota.sandbox %}<span class="badge">{{ uid }}</span> {% else %}<p>No users have reached the monthly limit.</p>{% endfor %}</div>
+</section>
+<section class="section">
+  <h2 class="section-title">Web Ban / Unban</h2>
+  <label class="form-label" for="banUserId">Telegram user ID</label>
+  <input id="banUserId" class="form-input" inputmode="numeric" placeholder="User ID">
+  <div class="modal-actions"><button class="btn btn-danger" type="button" data-web-ban="true">Ban</button><button class="btn btn-success" type="button" data-web-ban="false">Unban</button></div>
+  <p id="webBanStatus" role="status"></p>
+</section>
+
 <!-- All listings -->
 <section class="section">
   <h2 class="section-title">🏪 Top 10 Active Listings</h2>
@@ -41,8 +59,8 @@
         <tr id="admin-row-{{ lst._id_str }}">
           <td class="td-char">
             {% if lst.char_video %}
-            <video src="{{ lst.char_video }}" class="table-char-img char-video"
-                   controls preload="none"
+            <video data-video-src="{{ lst.char_video }}" class="table-char-img char-video"
+                   preload="none"
                    {% if lst.char_img %}poster="{{ lst.char_img }}"{% endif %}></video>
             {% else %}
             <img src="{{ lst.char_img }}" alt="" class="table-char-img"
@@ -199,7 +217,7 @@
   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
     <div style="padding:14px 18px;border:1px solid rgba(255,230,109,.35);border-radius:12px;background:rgba(255,230,109,.08);">
       <span style="color:var(--text3);font-size:.82rem;">Current pool</span><br>
-      <strong style="color:#ffe66d;font-size:1.35rem;">{{ lucky_pool_balance }}</strong>
+      <strong style="color:#ffe66d;font-size:1.35rem;"><span id="luckyPoolBalance">{{ lucky_pool_balance }}</span></strong>
     </div>
     <span style="color:var(--text3);font-size:.82rem;">Pool မလုံလောက်သေးသော card များမှာ win မပေးဘဲ stake ကို pool ထဲ ဆက်စုပါမည်။</span>
   </div>
@@ -280,7 +298,14 @@
     <div><div style="font-weight:600;color:var(--text);font-size:.9rem;">Rocket visibility</div><div style="font-size:.8rem;color:var(--text3);margin-top:2px;">OFF hides the card and blocks the page/API.</div></div>
     <label class="wh-toggle-label"><input type="checkbox" id="rocketShowToggle" class="wh-toggle-cb" {% if rocket_show %}checked{% endif %}><span class="wh-toggle-track"></span><span id="rocketShowText" class="wh-toggle-text">{% if rocket_show %}Visible{% else %}Hidden{% endif %}</span></label>
   </div>
-  <div style="margin-top:12px;color:var(--text3);font-size:.82rem;">Rocket pool: <strong style="color:#55dfff">{{ rocket_pool_balance }}</strong></div>
+  <div style="margin-top:12px;color:var(--text3);font-size:.82rem;">Rocket pool: <strong style="color:#55dfff"><span id="rocketPoolBalance">{{ rocket_pool_balance }}</span></strong></div>
+</section>
+
+<section class="section">
+  <h2 class="section-title">Reset Pool</h2>
+  <p class="text-muted">Set the selected pool to $0.00. User wallets stay unchanged.</p>
+  <button class="btn btn-danger" data-reset-pool="lucky">Reset Lucky Pool</button>
+  <button class="btn btn-danger" data-reset-pool="rocket">Reset Rocket Pool</button>
 </section>
 
 <!-- ── Spin Wheel ──────────────────────────────────────────────────────────── -->
@@ -438,14 +463,41 @@
 
 {% block scripts %}
 <script>
+document.querySelectorAll('[data-reset-pool]').forEach(button => {
+  button.addEventListener('click', async () => {
+    if (button.disabled || !confirm(`Reset ${button.dataset.resetPool} pool to $0.00?`)) return;
+    button.disabled = true;
+    try {
+      const result = await apiPost('/api/admin/pool/reset', {pool: button.dataset.resetPool});
+      if (result.ok) document.getElementById(button.dataset.resetPool + 'PoolBalance').textContent = result.balance;
+      showToast(result.ok ? 'Pool reset to $0.00' : result.error, result.ok ? 'success' : 'error');
+    } finally { button.disabled = false; }
+  });
+});
+document.getElementById('luckyBuyEnabled').addEventListener('change', async event => {
+  const toggle=event.target, enabled=toggle.checked;
+  toggle.disabled=true;
+  const result=await apiPost('/api/admin/lucky-buy', {enabled});
+  if(!result.ok) toggle.checked=!enabled;
+  document.getElementById('luckySwitchStatus').textContent=result.ok ? (enabled?'Lucky Buy enabled':'Lucky Buy disabled') : result.error;
+  toggle.disabled=false;
+});
+document.querySelectorAll('[data-web-ban]').forEach(button=>button.addEventListener('click',async()=>{
+  const buttons=[...document.querySelectorAll('[data-web-ban]')];
+  buttons.forEach(b=>b.disabled=true);
+  const result=await apiPost('/api/admin/web-ban',{user_id:document.getElementById('banUserId').value.trim(),banned:button.dataset.webBan==='true'});
+  document.getElementById('webBanStatus').textContent=result.ok?`User ${result.user_id}: ${result.banned?'banned':'unbanned'}`:result.error;
+  buttons.forEach(b=>b.disabled=false);
+}));
+
 /* ── Admin section navigation ── */
 (() => {
   const groups = {
     overview: ['Top 10 Active Listings'],
     appearance: ['Mini App Branding', 'Site Logo', 'Welcome Images', 'Market Mini Banner Ad', 'Waifu Market Animation'],
-    market: ['Lucky Buy Pool'],
+    market: ['Reset Pool', 'Lucky Buy Pool', 'Lucky Buy Switch', 'Auction Sandbox'],
     games: ['Rocket Game', 'Spin Wheel', 'Card Update', 'Daily Rare Rarity Controls', 'Secret Codes'],
-    system: ['Connection Settings', 'Website Maintenance Mode']
+    system: ['Connection Settings', 'Website Maintenance Mode', 'Web Ban / Unban']
   };
   const sections = [...document.querySelectorAll('section.section')];
   const tabs = [...document.querySelectorAll('.admin-tab')];
