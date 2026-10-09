@@ -239,6 +239,24 @@ document.querySelectorAll('.char-img, .table-char-img').forEach(img => {
     img.addEventListener('error', () => _imgReady(img));
   }
 });
+// All videos on this page share one playback owner, including native controls.
+let activePageVideo = null;
+const cardVideoReset = new WeakMap();
+function selectPageVideo(video) {
+  activePageVideo = video;
+  document.querySelectorAll('video').forEach(other => {
+    if (other === video) return;
+    other.pause();
+    cardVideoReset.get(other)?.();
+  });
+}
+document.addEventListener('play', event => {
+  if (event.target instanceof HTMLVideoElement && !event.target.paused) selectPageVideo(event.target);
+}, true);
+document.addEventListener('playing', event => {
+  const video = event.target;
+  if (video instanceof HTMLVideoElement && activePageVideo !== video) video.pause();
+}, true);
 document.querySelectorAll('video.char-video').forEach(video => {
   const shell = document.createElement('div');
   shell.className = 'video-shell';
@@ -249,19 +267,26 @@ document.querySelectorAll('video.char-video').forEach(video => {
   if (!video.poster) video.poster = '/static/img/card-placeholder.svg';
   const button = document.createElement('button');
   button.type = 'button'; button.className = 'video-play';
-  button.textContent = '▶ Play video · 480p';
-  shell.append(button);
-  const failed = () => { button.hidden=false; button.disabled=false; button.textContent='↻ Video unavailable · Tap to retry'; };
+  const reset = () => { button.hidden=false; button.disabled=false; button.textContent='Play Video'; };
+  reset(); shell.append(button); cardVideoReset.set(video, reset);
+  const failed = error => {
+    if (activePageVideo !== video || error?.name === 'AbortError') return;
+    button.hidden=false; button.disabled=false; button.textContent='↻ Video unavailable · Tap to retry';
+  };
   video.addEventListener('error', failed);
-  video.addEventListener('playing', () => { button.hidden=true; });
+  video.addEventListener('playing', () => { if (activePageVideo === video) button.hidden=true; });
+  video.addEventListener('ended', reset);
   button.addEventListener('click', () => {
+    if (button.disabled) return;
+    selectPageVideo(video);
     button.disabled=true; button.textContent='🌸 Preparing video…';
     video.controls=true;
-    const source = new URL(video.dataset.videoSrc, location.href);
-    // Telegram's WebViews support MP4; Chromium builds without H.264 use WebM.
-    if (!video.canPlayType('video/mp4; codecs="avc1.42E01E"')) source.searchParams.set('format', 'webm');
-    video.src=source.href;
-    video.load();
+    if (!video.getAttribute('src') || video.error) {
+      const source = new URL(video.dataset.videoSrc, location.href);
+      if (!video.canPlayType('video/mp4; codecs="avc1.42E01E"')) source.searchParams.set('format', 'webm');
+      video.src=source.href;
+      video.load();
+    }
     video.play().catch(failed);
   });
 });

@@ -14,6 +14,6 @@ for pool in (0, 99999, 100000, 199999, 200000):
 print('rocket rule tiers: ok')
 
 html = Path('templates/rocket.html').read_text()
-for token in ('pollOnce', "setTimeout(poll, pollDelay)", 'poolTier', 'rocket-flame'):
+for token in ('pollOnce', "setTimeout(poll, pollDelay)", 'cashoutBtn', 'rocket-flame'):
     assert token in html, token
 print('rocket live UI markers: ok')

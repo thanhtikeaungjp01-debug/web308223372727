@@ -1,13 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Rocket — Waifu Market{% endblock %}
 {% block content %}
-<section class="rocket-shell" id="rocketGame">
-  <div class="rocket-topbar"><a class="btn btn-ghost btn-sm" href="{{ url_for('market') }}">‹ Back</a><div class="rocket-brand">🚀 Rocket</div><div class="rocket-pool">Pool <strong id="poolValue">${{ '%.2f'|format(rocket_pool / 100) }}</strong></div></div>
+<section class="rocket-shell" id="rocketGame" data-user-id="{{ user.id }}">
+  <div class="rocket-topbar"><a class="btn btn-ghost btn-sm" href="{{ url_for('market') }}">‹ Back</a><div class="rocket-brand">🚀 Rocket</div></div>
   <div class="rocket-stage" id="rocketStage">
     <div class="rocket-stars" aria-hidden="true"></div>
     <div class="rocket-multiplier" id="multiplier">1.00x</div>
-    <div class="rocket-tier" id="poolTier">Pool rule loading…</div>
-    <div class="rocket-trajectory" aria-hidden="true"></div>
+      <div class="rocket-trajectory" aria-hidden="true"></div>
     <svg class="rocket-vector" id="rocketShip" viewBox="0 0 120 120" role="img" aria-label="Rocket animation">
       <defs><linearGradient id="rocketBody" x1="0" x2="1"><stop stop-color="#6fe8ff"/><stop offset="1" stop-color="#7864ff"/></linearGradient><linearGradient id="rocketFire" x1="0" x2="1"><stop stop-color="#ffe66d"/><stop offset="1" stop-color="#ff5fa2"/></linearGradient></defs>
       <path class="rocket-flame" d="M30 82 C12 94 11 108 38 98 C24 111 55 106 55 86Z" fill="url(#rocketFire)"/>
@@ -32,6 +31,9 @@
 (() => {
   const $ = id => document.getElementById(id), fmt = cents => `$${(Number(cents || 0) / 100).toFixed(2)}`;
   const stage = $('rocketStage'), ship = $('rocketShip'); let lastRound = '', phase = '', raf = 0, polling = 0, localBet = null, animRound = '', clockOffset = 0, currentParticipants = [], liveMultiplier = 1, localCashoutMultiplier = null;
+  const ownUserId = $('rocketGame').dataset.userId;
+  let actionVersion = 0, pendingCashoutMultiplier = null;
+  const ownMultiplier = m => localCashoutMultiplier ?? pendingCashoutMultiplier ?? m;
   let actionBusy = false, stateRequest = null, playerSignature = '', historySignature = '', playerNodes = [], lastPlayerPaint = 0;
   function stopAnimation(){ if (raf) cancelAnimationFrame(raf); raf = 0; ship.classList.remove('rocket-flying','rocket-crashed'); }
   function setFlightStyle(roundId){
@@ -43,7 +45,7 @@
     ship.classList.remove('rocket-style-1','rocket-style-2','rocket-style-3');
     ship.classList.add(`rocket-style-${style}`);
   }
-  function paintFlight(m, pool){
+  function paintFlight(m){
     liveMultiplier = Number(m)||1;
     const hue = m < 2.4 ? 'blue' : m < 5 ? 'purple' : 'red';
     const flightY = Math.min(150, Math.max(0, (liveMultiplier - 1) * 26));
@@ -56,15 +58,16 @@
   function animate(data){ if (data.phase !== 'RUNNING') { if (data.phase === 'SETTLED') ship.classList.add('rocket-crashed'); return; } const started = Number(data.started_at || 0) * 1000;
     if (!started) return;
     if (animRound !== data.round_id) { stopAnimation(); animRound=data.round_id; setFlightStyle(data.round_id); ship.classList.add('rocket-flying'); }
-    const frame = now => { if (phase !== 'RUNNING' || document.hidden) { raf=0; return; } const serverNow = now + clockOffset, elapsed = Math.max(0, serverNow-started)/1000, m = Math.max(1, 1+elapsed*.22); paintFlight(m, data.pool); $('countdown').textContent = localCashoutMultiplier === null ? `${m.toFixed(2)}x` : `${localCashoutMultiplier.toFixed(2)}x`; if (now-lastPlayerPaint > 100) { updatePlayerValues(m); lastPlayerPaint=now; } raf = requestAnimationFrame(frame); }; if (!raf) raf = requestAnimationFrame(frame);
+    const frame = now => { if (phase !== 'RUNNING' || document.hidden) { raf=0; return; } const serverNow = now + clockOffset, elapsed = Math.max(0, serverNow-started)/1000, m = Math.max(1, 1+elapsed*.22); paintFlight(m); $('countdown').textContent = `${ownMultiplier(m).toFixed(2)}x`; if (now-lastPlayerPaint > 100) { updatePlayerValues(m); lastPlayerPaint=now; } raf = requestAnimationFrame(frame); }; if (!raf) raf = requestAnimationFrame(frame);
   }
   async function api(url, opts={}){ const controller=new AbortController(), timeout=setTimeout(()=>controller.abort(),7000); try { const sentAt=performance.now(); const r=await fetch(url,{headers:{'Content-Type':'application/json'},signal:controller.signal,...opts}); const receivedAt=performance.now(); const d=await r.json(); if (d.server_now) clockOffset=(Number(d.server_now)*1000)-((sentAt+receivedAt)/2); return d; } catch(e){ return {ok:false,transient:true,error:'Reconnecting…'}; } finally { clearTimeout(timeout); } }
   function renderHistory(history){ const signature=JSON.stringify(history); if(signature===historySignature) return; historySignature=signature; const list=$('rocketHistory'); if(!history||!history.length){list.innerHTML='<div class="rocket-history-empty">No completed rounds yet</div>';return;} list.innerHTML=history.slice(0,10).map(item=>{const m=Number(item.multiplier||1), tone=m<2.4?'low':m<5?'mid':m<13?'purple':m<50?'high':'mega'; return `<span class="rocket-history-chip ${tone}">${m.toFixed(2)}x</span>`;}).join(''); }
   function updatePlayerValues(multiplier) {
     currentParticipants.forEach((player, index) => {
       if (player.status !== 'ACTIVE' || !playerNodes[index]) return;
-      playerNodes[index].multiplier.textContent = `×${Number(multiplier||1).toFixed(2)}`;
-      playerNodes[index].payout.textContent = '💎 ' + fmt(Math.round(Number(player.amount)*Number(multiplier||1)));
+      const value = String(player.user_id)===ownUserId ? ownMultiplier(Number(multiplier||1)) : Number(multiplier||1);
+      playerNodes[index].multiplier.textContent = `×${value.toFixed(2)}`;
+      playerNodes[index].payout.textContent = '💎 ' + fmt(Math.round(Number(player.amount)*value));
     });
   }
   function renderPlayers(players, multiplier) {
@@ -96,15 +99,43 @@
     if(b.status === 'LOST') return `Lose @ ${m}x`;
     return `${fmt(b.amount)} · ${b.status}`;
   }
-  function render(d){ if(!d.ok) return; if(d.round_id!==lastRound){lastRound=d.round_id; localBet=null; localCashoutMultiplier=null; stopAnimation(); setFlightStyle(d.round_id);} phase=d.phase; localBet=d.bet || null; if(localBet?.status==='CASHED_OUT') localCashoutMultiplier=Number(localBet.multiplier||1); $('poolValue').textContent=fmt(d.pool); $('balanceValue').textContent=fmt(d.balance); $('poolTier').textContent=d.crash_profile?`${d.crash_profile.label} · max ${Number(d.crash_profile.max_x).toFixed(1)}x`:'Pool rule loading…'; $('phaseText').textContent=localCashoutMultiplier !== null && phase==='RUNNING'?'Cashed out':phase==='WAITING'?'Waiting for first bet':phase==='BETTING_OPEN'?'Betting open':phase==='RUNNING'?'Rocket is flying':phase==='CASHED_OUT'?'Cashed out':'Round settled'; $('statusText').textContent=phase==='WAITING'?'Place the first bet to start the 8-second countdown':phase==='BETTING_OPEN'?'Place your bet before launch':phase==='RUNNING'?'Cash out before crash':phase==='CASHED_OUT'?'✓ Cashout confirmed — waiting for crash':'Crash — waiting for next bet'; updateControls(); if(phase==='WAITING') $('countdown').textContent='—'; else if(phase==='BETTING_OPEN') $('countdown').textContent=`${Math.max(0,Math.ceil(Number(d.ends_at)-Date.now()/1000))}s`; else $('countdown').textContent=phase==='RUNNING'?(localCashoutMultiplier === null ? `${Number(d.multiplier||1).toFixed(2)}x` : `${localCashoutMultiplier.toFixed(2)}x`):'—'; if (phase==='SETTLED') { const crashedAt=Number(d.crash_multiplier||d.multiplier||1); stopAnimation(); paintFlight(crashedAt); $('countdown').textContent=`${crashedAt.toFixed(2)}x`; $('statusText').textContent=`Crashed at ${crashedAt.toFixed(2)}x`; ship.classList.add('rocket-crashed'); } if(d.bet) localBet=d.bet; if(localBet?.status==='CASHED_OUT' && localCashoutMultiplier===null) localCashoutMultiplier=Number(localBet.multiplier||1); $('betInfo').textContent=renderBetInfo(localBet); if(phase==='RUNNING' && localBet?.status==='CASHED_OUT') $('statusText').textContent='✓ Cashout confirmed — Rocket still flying'; renderHistory(d.history||[]); renderPlayers(d.participants||[],d.multiplier); if(phase==='RUNNING') animate(d); else if(phase==='SETTLED'){stopAnimation(); ship.classList.add('rocket-crashed');} }
+  function render(d) {
+    if (!d.ok) return;
+    if (d.round_id !== lastRound) {
+      lastRound=d.round_id; localBet=null; localCashoutMultiplier=null;
+      stopAnimation(); setFlightStyle(d.round_id);
+    }
+    phase=d.phase;
+    // Confirmed cashouts are terminal, even if an older read arrives late.
+    if (localBet?.status !== 'CASHED_OUT') localBet=d.bet || null;
+    if (localBet?.status==='CASHED_OUT') localCashoutMultiplier=Number(localBet.multiplier||1);
+    $('balanceValue').textContent=fmt(d.balance);
+    updateControls();
+    $('phaseText').textContent=localCashoutMultiplier!==null?'Cashed out':phase==='WAITING'?'Waiting for first bet':phase==='BETTING_OPEN'?'Betting open':phase==='RUNNING'?'Rocket is flying':'Round settled';
+    $('statusText').textContent=phase==='WAITING'?'Place the first bet to start the 8-second countdown':phase==='BETTING_OPEN'?'Place your bet before launch':phase==='RUNNING'?'Cash out before crash':'Round settled';
+    const multiplier=Number(d.multiplier||1);
+    $('countdown').textContent=localCashoutMultiplier!==null ? `${localCashoutMultiplier.toFixed(2)}x` : phase==='BETTING_OPEN' ? `${Math.max(0,Math.ceil(Number(d.ends_at)-Date.now()/1000))}s` : phase==='RUNNING' ? `${ownMultiplier(multiplier).toFixed(2)}x` : '—';
+    if (phase==='SETTLED') {
+      const crashedAt=Number(d.crash_multiplier||d.multiplier||1);
+      stopAnimation(); paintFlight(crashedAt); ship.classList.add('rocket-crashed');
+      if (localCashoutMultiplier===null) $('countdown').textContent=`${crashedAt.toFixed(2)}x`;
+      $('statusText').textContent=`Crashed at ${crashedAt.toFixed(2)}x`;
+    }
+    $('betInfo').textContent=renderBetInfo(localBet);
+    if (localBet?.status==='CASHED_OUT') $('statusText').textContent=`✓ Cashed out at ${localCashoutMultiplier.toFixed(2)}x · ${fmt(localBet.payout)}`;
+    renderHistory(d.history||[]);
+    renderPlayers((d.participants||[]).map(p => String(p.user_id)===ownUserId && localBet?.status==='CASHED_OUT' ? {...p,...localBet} : p),multiplier);
+    if (phase==='RUNNING') animate(d);
+  }
   let pollDelay=500;
   async function pollOnce() {
     if (stateRequest) return stateRequest;
+    const version = actionVersion;
     stateRequest = api('/api/rocket/state');
     try {
       const d = await stateRequest;
       // Never let a state response started before a mutation overwrite its result.
-      if (d.ok && !actionBusy) render(d);
+      if (d.ok && !actionBusy && version===actionVersion) render(d);
       return d;
     } finally { stateRequest = null; }
   }
@@ -114,34 +145,42 @@
     if (!actionBusy) {
       const d = await pollOnce();
       if (d.ok) pollDelay = d.phase==='RUNNING' ? 650 : 1200;
-      else { pollDelay = Math.min(4000, pollDelay*1.5); $('statusText').textContent=d.error||'Reconnecting…'; }
+      else { pollDelay = Math.min(4000, pollDelay*1.5); if (!actionBusy && localCashoutMultiplier===null) $('statusText').textContent=d.error||'Reconnecting…'; }
     }
     if (!document.hidden) polling=setTimeout(poll, pollDelay);
   }
   async function mutate(url, body, done) {
     if (actionBusy) return;
-    actionBusy=true; updateControls();
-    // Drain a pending state request before changing balances or bet state.
-    if (stateRequest) await stateRequest;
-    const d = await api(url, {method:'POST',body:JSON.stringify(body)});
+    actionBusy=true; actionVersion++; updateControls();
+    // Send immediately: an outstanding state poll must never delay cashout.
+    const d = await api(url, {method:'POST',body:JSON.stringify({...body,round_id:lastRound})});
     if (d.ok) done(d);
-    else $('statusText').textContent=d.error||'Please try again';
+    pendingCashoutMultiplier=null;
     actionBusy=false; updateControls();
-    if (d.ok) await pollOnce();
+    if (!d.ok) $('statusText').textContent=d.error||'Please try again';
+    clearTimeout(polling);
+    polling=setTimeout(poll, d.ok ? 0 : 1200);
   }
   $('betBtn').onclick=()=>{
     const amount=Number($('betAmount').value);
     if (!Number.isFinite(amount) || amount<=0) { $('statusText').textContent='Enter a valid amount'; return; }
     return mutate('/api/rocket/bet',{amount},d=>{localBet=d.bet; $('betAmount').value='';});
   };
-  $('cashoutBtn').onclick=()=>mutate('/api/rocket/cashout',{},d=>{
-    localCashoutMultiplier=Number(d.multiplier||1);
-    localBet={...localBet,status:'CASHED_OUT',payout:d.payout,multiplier:localCashoutMultiplier};
-    $('betInfo').textContent=renderBetInfo(localBet);
-    $('countdown').textContent=`${localCashoutMultiplier.toFixed(2)}x`;
-    $('statusText').textContent=`✓ Cashed out at ${localCashoutMultiplier.toFixed(2)}x — Rocket still flying`;
-    $('balanceValue').textContent=fmt(d.balance); $('poolValue').textContent=fmt(d.pool);
-  });
+  $('cashoutBtn').onclick=()=>{
+    if (actionBusy || localBet?.status!=='ACTIVE' || phase!=='RUNNING') return;
+    pendingCashoutMultiplier=Number(liveMultiplier||1);
+    $('statusText').textContent='Confirming cashout…';
+    return mutate('/api/rocket/cashout',{},d=>{
+      localCashoutMultiplier=Number(d.multiplier||1);
+      localBet={...localBet,status:'CASHED_OUT',payout:d.payout,multiplier:localCashoutMultiplier};
+      $('betInfo').textContent=renderBetInfo(localBet);
+      $('countdown').textContent=`${localCashoutMultiplier.toFixed(2)}x`;
+      $('phaseText').textContent='Cashed out';
+      $('statusText').textContent=`✓ Cashed out at ${localCashoutMultiplier.toFixed(2)}x · ${fmt(d.payout)}`;
+      $('balanceValue').textContent=fmt(d.balance);
+      renderPlayers(currentParticipants.map(p=>String(p.user_id)===ownUserId?{...p,...localBet}:p),liveMultiplier);
+    });
+  };
   document.addEventListener('visibilitychange',()=>{
     clearTimeout(polling);
     if (document.hidden) { stopAnimation(); animRound=''; }
