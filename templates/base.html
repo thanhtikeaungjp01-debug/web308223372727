@@ -24,7 +24,7 @@
 </head>
 <body class="{% block body_class %}{% endblock %}">
 
-<div id="appLoader" role="status" aria-live="polite"><span class="boot-flower" aria-hidden="true">🌸</span><span id="bootMessage">Loading your world…</span><button id="bootRetry" type="button" hidden onclick="location.reload()">Try again</button></div>
+<div id="appLoader" role="status" aria-live="polite"><span class="boot-flower" aria-hidden="true">🌸</span><span id="bootMessage">Loading Guess Data</span><button id="bootRetry" type="button" hidden onclick="location.reload()">Try again</button></div>
 <script>
 window.AppBoot={
   finish(){document.documentElement.classList.remove('booting');document.getElementById('appLoader')?.setAttribute('hidden','');},
