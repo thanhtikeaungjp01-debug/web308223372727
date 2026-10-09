@@ -16,7 +16,7 @@ import tempfile
 import subprocess
 import urllib.parse
 from PIL import Image, ImageOps
-from functools import lru_cache
+from functools import lru_cache, wraps
 from threading import Lock
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -492,6 +492,29 @@ def prevent_duplicate_actions():
         if not token:
             return jsonify(ok=False, error='Please wait before trying again.'), 429
         g.action_guard = (uid, request.endpoint, token)
+
+
+def rocket_serialized(view):
+    """Serialize shared round writes across Vercel instances, not just per user."""
+    @wraps(view)
+    def guarded(*args, **kwargs):
+        if request.endpoint == 'admin_reset_pool' and (not is_owner() or (request.get_json(silent=True) or {}).get('pool') != 'rocket'):
+            return view(*args, **kwargs)
+        db = get_db()
+        # Polls yield immediately; player actions get a brief chance to acquire the round.
+        deadline = time.monotonic() + (0.75 if request.method == 'POST' else 0)
+        token = db.begin_action(0, 'rocket_round')
+        while not token and time.monotonic() < deadline:
+            time.sleep(0.025)
+            token = db.begin_action(0, 'rocket_round')
+        if not token:
+            return jsonify(ok=False, transient=True, error='Rocket is busy. Please try again.'), 503
+        try:
+            g.rocket_action_at = time.time()
+            return view(*args, **kwargs)
+        finally:
+            db.finish_action(0, 'rocket_round', token)
+    return guarded
 
 
 @app.after_request
@@ -1211,6 +1234,7 @@ def admin_lucky_buy_switch():
 
 
 @app.route('/api/admin/pool/reset', methods=['POST'])
+@rocket_serialized
 def admin_reset_pool():
     if not is_owner(): return jsonify(ok=False, error='Unauthorized'), 403
     pool = (request.get_json(silent=True) or {}).get('pool')
@@ -1662,9 +1686,9 @@ def _rocket_settle(state, now):
             bet.update({"status": "LOST", "multiplier": round(crash_multiplier, 2), "payout": 0})
     return state
 
-def _rocket_phase(db):
+def _rocket_phase(db, now=None):
     state = db.get_rocket_state()
-    now = time.time()
+    now = time.time() if now is None else now
     if not state or state.get("phase") is None or (
         state.get("phase") == "SETTLED" and now >= float(state.get("settled_until", 0))
     ):
@@ -1690,20 +1714,20 @@ def _rocket_phase(db):
 @login_required
 def rocket():
     if not _rocket_allowed(): abort(404)
-    return render_template("rocket.html", user=current_user(), balance=get_db().get_balance(session["user_id"]), rocket_pool=get_db().get_rocket_pool())
+    return render_template("rocket.html", user=current_user(), balance=get_db().get_balance(session["user_id"]))
 
 @app.route("/api/rocket/state")
 @api_login_required
+@rocket_serialized
 def api_rocket_state():
     db = get_db()
     if not _rocket_allowed(): return jsonify({"ok": False, "error": "Rocket is disabled"}), 404
-    state = _rocket_phase(db); uid = str(session["user_id"])
+    now = g.rocket_action_at
+    state = _rocket_phase(db, now); uid = str(session["user_id"])
     bet = state.get("bets", {}).get(uid)
     if state.get("phase") == "RUNNING":
-        elapsed = max(0.0, time.time() - float(state.get("started_at", time.time())))
+        elapsed = max(0.0, now - float(state.get("started_at", now)))
         state["multiplier"] = round(1.0 + elapsed * 0.22, 2)
-        if time.time() >= float(state.get("crash_at", 0)):
-            _rocket_settle(state, time.time()); db.set_rocket_state(state)
     multiplier = float(state.get("multiplier", 1.0))
     participants = []
     for user_key, item in (state.get("bets") or {}).items():
@@ -1719,10 +1743,14 @@ def api_rocket_state():
 
 @app.route("/api/rocket/bet", methods=["POST"])
 @api_login_required
+@rocket_serialized
 def api_rocket_bet():
     db = get_db()
     if not _rocket_allowed(): return jsonify({"ok": False, "error": "Rocket is disabled"}), 404
-    state = _rocket_phase(db)
+    state = _rocket_phase(db, g.rocket_action_at)
+    requested_round = (request.get_json(silent=True) or {}).get("round_id")
+    if requested_round and requested_round != state.get("round_id"):
+        return jsonify(ok=False, error="Round changed. Please try again."), 409
     if state.get("phase") not in ("WAITING", "BETTING_OPEN"):
         return jsonify({"ok": False, "error": "Betting is closed"}), 409
     if state.get("phase") == "WAITING":
@@ -1741,14 +1769,22 @@ def api_rocket_bet():
 
 @app.route("/api/rocket/cashout", methods=["POST"])
 @api_login_required
+@rocket_serialized
 def api_rocket_cashout():
     db = get_db()
     if not _rocket_allowed(): return jsonify({"ok": False, "error": "Rocket is disabled"}), 404
-    state = _rocket_phase(db); uid = session["user_id"]; key = str(uid)
-    if state.get("phase") != "RUNNING": return jsonify({"ok": False, "error": "Cashout is not available"}), 409
+    now = g.rocket_action_at
+    state = _rocket_phase(db, now); uid = session["user_id"]; key = str(uid)
+    requested_round = (request.get_json(silent=True) or {}).get("round_id")
+    if requested_round and requested_round != state.get("round_id"):
+        return jsonify(ok=False, error="This round has ended."), 409
     bet = state.get("bets", {}).get(key)
+    if bet and bet.get("status") == "CASHED_OUT":
+        return jsonify(ok=True, multiplier=bet["multiplier"], payout=bet["payout"],
+                       balance=db.get_balance(uid), pool=db.get_rocket_pool())
+    if state.get("phase") != "RUNNING": return jsonify({"ok": False, "error": "Cashout is not available"}), 409
     if not bet or bet.get("status") != "ACTIVE": return jsonify({"ok": False, "error": "No active bet"}), 409
-    multiplier = round(1.0 + max(0.0, time.time() - float(state.get("started_at", time.time()))) * 0.22, 2)
+    multiplier = round(1.0 + max(0.0, now - float(state.get("started_at", now))) * 0.22, 2)
     payout = int(round(int(bet["amount"]) * multiplier))
     if not db.withdraw_rocket_pool(payout): return jsonify({"ok": False, "error": "Pool cannot cover this payout"}), 409
     db.add_coins(uid, payout); bet.update({"status": "CASHED_OUT", "multiplier": multiplier, "payout": payout}); db.set_rocket_state(state)
